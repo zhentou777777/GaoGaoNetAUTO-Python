@@ -30,24 +30,38 @@ from netguard import NetGuard
 from qrflow import QrAssistant
 
 # ---------------------------------------------------------------- 主题
+#
+# 现代暗色配色：以「蓝紫夜色」为底，粉色作主强调色（B 站味），
+# 青绿 / 琥珀 / 珊瑚 分别代表成功 / 警告 / 失败。
+# 层级靠明度而非边框堆叠，避免界面显得脏。
 
-BG = "#14141a"
-CARD = "#1c1c25"
-CARD_HI = "#23232e"
-BORDER = "#2c2c38"
-TEXT = "#ecedf2"
-TEXT2 = "#9b9baa"
-TEXT3 = "#6b6b7b"
-ACCENT = "#FB7299"
-ACCENT_HI = "#ff8fae"
-OK_C = "#4ade80"
-WARN_C = "#fbbf24"
-ERR_C = "#f87171"
+BG = "#0f1116"          # 窗口底色（最暗）
+BG_GRAD = "#14161e"     # 顶栏
+CARD = "#191c25"        # 卡片
+CARD_HI = "#222633"     # 卡片内高亮 / 输入框
+CARD_HI2 = "#2a2f3d"    # 悬停
+BORDER = "#262b38"      # 常规描边
+BORDER_SOFT = "#1e222d"  # 弱分隔线
+TEXT = "#eef0f6"        # 主文字
+TEXT2 = "#a3aab9"       # 次要文字
+TEXT3 = "#6b7386"       # 弱化文字 / 占位符
+ACCENT = "#FB7299"      # 主强调（B 站粉）
+ACCENT_HI = "#ff92b3"   # 强调悬停
+ACCENT_DIM = "#3a2430"  # 强调色弱背景
+OK_C = "#3ddc97"        # 成功
+OK_DIM = "#16302a"
+WARN_C = "#f5c451"      # 警告
+WARN_DIM = "#33291a"
+ERR_C = "#ff6b81"       # 失败
+ERR_DIM = "#331c25"
+INFO_C = "#5ab0f5"      # 信息
+INFO_DIM = "#16293a"
 
 FONT = "Microsoft YaHei UI"
 MONO = "Consolas"
 
-WIN_W, WIN_H = 940, 660
+WIN_W, WIN_H = 1020, 720
+WIN_MIN_W, WIN_MIN_H = 860, 560
 
 
 def _round_rect(canvas: tk.Canvas, x1, y1, x2, y2, r, **kw) -> int:
@@ -59,8 +73,23 @@ def _round_rect(canvas: tk.Canvas, x1, y1, x2, y2, r, **kw) -> int:
     return canvas.create_polygon(pts, smooth=True, splinesteps=24, **kw)
 
 
+def _mix(c1: str, c2: str, t: float) -> str:
+    """按比例混合两个 #rrggbb 颜色。"""
+    t = max(0.0, min(1.0, t))
+    a = [int(c1[i:i + 2], 16) for i in (1, 3, 5)]
+    b = [int(c2[i:i + 2], 16) for i in (1, 3, 5)]
+    return "#" + "".join(f"{int(a[i] + (b[i] - a[i]) * t):02x}" for i in range(3))
+
+
 class Pill(tk.Canvas):
-    """扁平圆角按钮。"""
+    """扁平圆角按钮。
+
+    style:
+        accent —— 主行动按钮（粉色实心）
+        ghost  —— 次级按钮（描边）
+        solid  —— 深色实心
+        quiet  —— 弱化按钮（文字型）
+    """
 
     def __init__(
         self,
@@ -71,30 +100,57 @@ class Pill(tk.Canvas):
         height: int = 38,
         width: int = 150,
         font=(),
+        style: str = "",
+        icon: str = "",
     ):
         bg = master.cget("bg")
         super().__init__(
             master, height=height, width=width, bg=bg,
             highlightthickness=0, bd=0, cursor="hand2",
+            takefocus=0,
         )
         self._text = text
         self._command = command
-        self._accent = accent
+        self._style = style or ("accent" if accent else "solid")
         self._font = font or (FONT, 10)
+        self._icon = icon
         self._hover = False
+        self._press = False
         self._enabled = True
         self.bind("<Configure>", lambda e: self._redraw())
         self.bind("<Enter>", self._on_enter)
         self.bind("<Leave>", self._on_leave)
-        self.bind("<Button-1>", self._on_click)
+        self.bind("<ButtonPress-1>", self._on_press)
+        self.bind("<ButtonRelease-1>", self._on_release)
         self._redraw()
 
+    # ------------------------------------------------------------ 配色
+
     def _colors(self):
+        st = self._style
         if not self._enabled:
-            return CARD_HI, TEXT3
-        if self._accent:
-            return (ACCENT_HI if self._hover else ACCENT), "#ffffff"
-        return (CARD_HI if self._hover else CARD), TEXT
+            if st == "accent":
+                return "#2a2f3d", "#5c6376"
+            if st == "ghost":
+                return None, "#4d5466"
+            return CARD, "#4d5466"
+        if st == "accent":
+            base = ACCENT_HI if self._hover else ACCENT
+            if self._press:
+                base = _mix(base, "#000000", 0.16)
+            return base, "#ffffff"
+        if st == "ghost":
+            fill = CARD_HI2 if self._hover else None
+            edge = _mix(BORDER, ACCENT, 0.45) if self._hover else BORDER
+            return fill, TEXT if self._hover else TEXT2
+        if st == "quiet":
+            return (CARD_HI if self._hover else None), TEXT2
+        fill = CARD_HI2 if self._hover else CARD_HI
+        if self._press:
+            fill = _mix(fill, "#000000", 0.18)
+        return fill, TEXT
+
+    # ------------------------------------------------------------ 绘制
 
     def _redraw(self):
         self.delete("all")
@@ -103,10 +159,42 @@ class Pill(tk.Canvas):
         if w <= 1 or h <= 1:
             return
         fill, fg = self._colors()
-        _round_rect(self, 1, 1, w - 1, h - 1, min(10, h // 3), fill=fill, outline="")
-        self.create_text(
-            w / 2, h / 2, text=self._text, fill=fg, font=self._font, anchor="center"
-        )
+        r = min(9, h // 3)
+
+        if fill is None:
+            # 描边样式：先画一圈底，再画内层
+            _round_rect(self, 0.5, 0.5, w - 0.5, h - 0.5, r,
+                        fill=BG, outline=self._edge_color(), width=1)
+        else:
+            _round_rect(self, 1, 1, w - 1, h - 1, r, fill=fill, outline="")
+            if self._style == "accent":
+                # 顶部高光，制造轻微的立体感
+                _round_rect(self, 2, 2, w - 2, h // 2, r,
+                            fill=_mix(fill, "#ffffff", 0.10), outline="")
+
+        if self._icon:
+            self.create_text(
+                w / 2 - 8, h / 2, text=self._icon, fill=fg,
+                font=(FONT, 10), anchor="center",
+            )
+            self.create_text(
+                w / 2 + (8 if self._icon else 0), h / 2, text=self._text,
+                fill=fg, font=self._font, anchor="center",
+            )
+        else:
+            self.create_text(
+                w / 2, h / 2, text=self._text, fill=fg,
+                font=self._font, anchor="center",
+            )
+
+    def _edge_color(self) -> str:
+        if not self._enabled:
+            return BORDER_SOFT
+        if self._hover:
+            return _mix(BORDER, ACCENT, 0.45)
+        return BORDER
+
+    # ------------------------------------------------------------ 交互
 
     def _on_enter(self, _e):
         self._hover = True
@@ -114,10 +202,19 @@ class Pill(tk.Canvas):
 
     def _on_leave(self, _e):
         self._hover = False
+        self._press = False
         self._redraw()
 
-    def _on_click(self, _e):
-        if self._enabled and self._command:
+    def _on_press(self, _e):
+        if self._enabled:
+            self._press = True
+            self._redraw()
+
+    def _on_release(self, _e):
+        was = self._press
+        self._press = False
+        self._redraw()
+        if was and self._enabled and self._command:
             self._command()
 
     def set_enabled(self, flag: bool):
@@ -129,9 +226,13 @@ class Pill(tk.Canvas):
         self._text = text
         self._redraw()
 
+    def set_style(self, style: str):
+        self._style = style
+        self._redraw()
+
 
 class Dot(tk.Canvas):
-    """状态指示灯。"""
+    """状态指示灯：外圈光晕 + 实心圆点。"""
 
     def __init__(self, master, color: str = TEXT3, size: int = 14):
         super().__init__(
@@ -145,7 +246,13 @@ class Dot(tk.Canvas):
     def _redraw(self):
         self.delete("all")
         s = self._size
-        self.create_oval(2, 2, s - 2, s - 2, fill=self._color, outline="")
+        # 光晕
+        self.create_oval(1, 1, s - 1, s - 1, fill=_mix(self._color, BG, 0.78),
+                         outline="")
+        # 实心
+        inset = max(3, s // 4)
+        self.create_oval(inset, inset, s - inset, s - inset,
+                         fill=self._color, outline="")
 
     def set_color(self, color: str):
         self._color = color
@@ -186,42 +293,59 @@ class App:
         root.title("糕糕校园网自动认证")
         root.configure(bg=BG)
         root.geometry(f"{WIN_W}x{WIN_H}")
-        root.resizable(False, False)
+        # 允许自由缩放
+        root.resizable(True, True)
+        root.minsize(WIN_MIN_W, WIN_MIN_H)
         root.protocol("WM_DELETE_WINDOW", self._on_close)
 
         # 顶部标题栏
-        header = tk.Frame(root, bg=CARD, height=52)
+        header = tk.Frame(root, bg=BG_GRAD, height=54)
         header.pack(fill="x")
         header.pack_propagate(False)
         header.bind("<ButtonPress-1>", self._drag_start)
         header.bind("<B1-Motion>", self._drag_move)
 
-        tk.Label(
-            header, text="糕糕校园网自动认证", bg=CARD, fg=TEXT,
-            font=(FONT, 12, "bold"), anchor="w",
-        ).pack(side="left", padx=18)
+        # 品牌区：小圆点 + 标题 + 副标题
+        brand = tk.Frame(header, bg=BG_GRAD)
+        brand.pack(side="left", padx=(20, 0))
+        brand.bind("<ButtonPress-1>", self._drag_start)
+        brand.bind("<B1-Motion>", self._drag_move)
 
-        self.btn_min = Pill(header, "—", self.root.iconify, height=26, width=34,
-                            font=(FONT, 11))
-        self.btn_min.pack(side="right", padx=(0, 8), pady=12)
-        self.btn_close = Pill(header, "✕", self._on_close, accent=True, height=26, width=34,
-                              font=(FONT, 10))
-        self.btn_close.pack(side="right", padx=(0, 4), pady=12)
+        mark = tk.Canvas(brand, width=26, height=26, bg=BG_GRAD,
+                         highlightthickness=0, bd=0)
+        mark.pack(side="left", pady=(14, 14))
+        _round_rect(mark, 2, 2, 24, 24, 7, fill=ACCENT, outline="")
+        mark.create_text(13, 13, text="糕", fill="#ffffff",
+                         font=(FONT, 9, "bold"))
+
+        titles = tk.Frame(brand, bg=BG_GRAD)
+        titles.pack(side="left", padx=(10, 0), pady=(9, 0))
+        tk.Label(titles, text="糕糕校园网自动认证", bg=BG_GRAD, fg=TEXT,
+                 font=(FONT, 11, "bold"), anchor="w").pack(anchor="w")
+        tk.Label(titles, text="开机自启 · 断网自愈 · 全程免手机", bg=BG_GRAD,
+                 fg=TEXT3, font=(FONT, 8), anchor="w").pack(anchor="w")
+
+        self.btn_min = Pill(header, "—", self.root.iconify, height=28, width=36,
+                            style="quiet", font=(FONT, 11))
+        self.btn_min.pack(side="right", padx=(0, 8), pady=13)
+        self.btn_close = Pill(header, "✕", self._on_close, height=28, width=36,
+                              style="quiet", font=(FONT, 10))
+        self.btn_close.pack(side="right", padx=(0, 6), pady=13)
 
         # 主体
         body = tk.Frame(root, bg=BG)
-        body.pack(fill="both", expand=True, padx=16, pady=(14, 16))
+        body.pack(fill="both", expand=True, padx=18, pady=(16, 18))
 
         left = tk.Frame(body, bg=BG)
         left.pack(side="left", fill="both", expand=True)
 
-        # 右侧设置面板做成可滚动 —— 内容变多（如新增账号密码区）也不会被裁掉
-        right = tk.Frame(body, bg=BG, width=330)
-        right.pack(side="right", fill="y", padx=(14, 0))
+        # 右侧设置面板做成可滚动 —— 内容变多也不会被裁掉
+        right = tk.Frame(body, bg=BG, width=356)
+        right.pack(side="right", fill="y", padx=(16, 0))
         right.pack_propagate(False)
 
         canvas = tk.Canvas(right, bg=BG, highlightthickness=0, bd=0,
-                           width=330)
+                           width=356)
         canvas.pack(side="left", fill="both", expand=True)
         scrollbar = tk.Scrollbar(right, orient="vertical", command=canvas.yview,
                                   width=8, troughcolor=BG, bg=BORDER,
@@ -258,38 +382,54 @@ class App:
                         highlightbackground=BORDER, highlightcolor=BORDER)
         card.pack(fill="x")
         inner = tk.Frame(card, bg=CARD)
-        inner.pack(fill="x", padx=20, pady=18)
+        inner.pack(fill="x", padx=22, pady=(20, 18))
 
         top = tk.Frame(inner, bg=CARD)
         top.pack(fill="x")
-        self.dot = Dot(top, TEXT3, 16)
-        self.dot.pack(side="left", pady=(2, 0))
+        self.dot = Dot(top, TEXT3, 18)
+        self.dot.pack(side="left", pady=(3, 0))
         self.lbl_status = tk.Label(
-            top, text="尚未认证", bg=CARD, fg=TEXT, font=(FONT, 16, "bold"), anchor="w"
+            top, text="尚未认证", bg=CARD, fg=TEXT, font=(FONT, 17, "bold"), anchor="w"
         )
-        self.lbl_status.pack(side="left", padx=(12, 0))
+        self.lbl_status.pack(side="left", padx=(13, 0))
         self.lbl_badge = tk.Label(
             top, text="", bg=CARD, fg=TEXT3, font=(FONT, 9), anchor="e"
         )
         self.lbl_badge.pack(side="right")
 
-        tk.Frame(inner, bg=BORDER, height=1).pack(fill="x", pady=(14, 12))
+        tk.Frame(inner, bg=BORDER_SOFT, height=1).pack(fill="x", pady=(15, 13))
 
+        # 键值网格：标签弱化、取值高亮
+        grid = tk.Frame(inner, bg=CARD)
+        grid.pack(fill="x")
         self.lbl_info = tk.Label(
-            inner, text="", bg=CARD, fg=TEXT2, font=(FONT, 9),
+            grid, text="", bg=CARD, fg=TEXT2, font=(FONT, 9),
             justify="left", anchor="w",
         )
         self.lbl_info.pack(fill="x")
 
+        # 自动重连状态条（醒目位置，一眼看出是否就绪）
+        self.bar_heal = tk.Frame(inner, bg=OK_DIM)
+        self.bar_heal.pack(fill="x", pady=(14, 0))
+        self.lbl_heal = tk.Label(
+            self.bar_heal, text="", bg=OK_DIM, fg=OK_C, font=(FONT, 9),
+            anchor="w", padx=12, pady=8,
+        )
+        self.lbl_heal.pack(fill="x")
+
     def _build_actions(self, parent):
         bar = tk.Frame(parent, bg=BG)
         bar.pack(fill="x", pady=(14, 0))
+
         self.btn_login = Pill(bar, "立即认证", self._do_login, accent=True,
-                              height=40, width=132)
+                              height=42, width=140, icon="⚡")
         self.btn_login.pack(side="left")
-        Pill(bar, "扫码登录", self._open_qr, height=40, width=120).pack(side="left", padx=(10, 0))
-        Pill(bar, "归还名额", self._do_logout, height=40, width=110).pack(side="left", padx=(10, 0))
-        Pill(bar, "检查 Token", self._do_check_token, height=40, width=118).pack(side="left", padx=(10, 0))
+        Pill(bar, "扫码登录", self._open_qr, height=42, width=126,
+             style="ghost", icon="▣").pack(side="left", padx=(10, 0))
+        Pill(bar, "归还名额", self._do_logout, height=42, width=126,
+             style="ghost", icon="↩").pack(side="left", padx=(10, 0))
+        Pill(bar, "检查 Token", self._do_check_token, height=42, width=134,
+             style="ghost", icon="✓").pack(side="left", padx=(10, 0))
 
     def _build_log(self, parent):
         wrap = tk.Frame(parent, bg=BG)
@@ -319,6 +459,10 @@ class App:
         tk.Label(parent, text=text, bg=CARD, fg=color, font=(FONT, 9),
                  anchor="w").pack(fill="x")
 
+    def _hint(self, parent, text):
+        tk.Label(parent, text=text, bg=CARD, fg=TEXT3, font=(FONT, 8),
+                 anchor="w", justify="left").pack(fill="x", pady=(4, 0))
+
     def _entry(self, parent, text="", show=""):
         var = tk.StringVar(value=text)
         e = tk.Entry(
@@ -327,77 +471,96 @@ class App:
             highlightbackground=BORDER, highlightcolor=ACCENT,
             show=show, bd=0,
         )
-        e.pack(fill="x", pady=(4, 0), ipady=6)
+        e.pack(fill="x", pady=(5, 0), ipady=7)
         return var, e
+
+    def _section(self, parent, title, subtitle=""):
+        """设置项分组标题。"""
+        tk.Frame(parent, bg=BORDER_SOFT, height=1).pack(fill="x", pady=(16, 10))
+        head = tk.Frame(parent, bg=CARD)
+        head.pack(fill="x")
+        tk.Label(head, text=title, bg=CARD, fg=TEXT, font=(FONT, 10, "bold"),
+                 anchor="w").pack(side="left")
+        if subtitle:
+            tk.Label(head, text=subtitle, bg=CARD, fg=TEXT3, font=(FONT, 8),
+                     anchor="e").pack(side="right")
+        return head
 
     def _build_settings(self, parent):
         card = tk.Frame(parent, bg=CARD, highlightthickness=1,
                         highlightbackground=BORDER, highlightcolor=BORDER)
         card.pack(fill="both", expand=True)
         inner = tk.Frame(card, bg=CARD)
-        inner.pack(fill="both", expand=True, padx=16, pady=16)
+        inner.pack(fill="both", expand=True, padx=18, pady=(16, 18))
 
-        tk.Label(inner, text="设置", bg=CARD, fg=TEXT, font=(FONT, 11, "bold"),
-                 anchor="w").pack(fill="x")
+        # ---- 标题
+        head = tk.Frame(inner, bg=CARD)
+        head.pack(fill="x")
+        tk.Label(head, text="设置", bg=CARD, fg=TEXT, font=(FONT, 12, "bold"),
+                 anchor="w").pack(side="left")
+        tk.Label(head, text="改动后记得点底部「保存设置」", bg=CARD, fg=TEXT3,
+                 font=(FONT, 8), anchor="e").pack(side="right")
 
-        # Token
-        self._label(inner, "Bearer Token（来自糕糕 APP）")
+        # ---- 账号密码（最优先：决定断网能不能自愈）
+        self._section(inner, "① 账号密码", "自动换 Token，免抓包")
+        self._label(inner, "云高手机号")
+        self.var_mobile, _ = self._entry(inner, "")
+        self._label(inner, "登录密码")
+        self.var_pwd, _ = self._entry(inner, "", show="•")
+        self._hint(inner, "填了之后 Token 失效会自动换新的，断网也能自己接上。\n"
+                          "密码用机器指纹派生密钥加密后存储，配置里是密文。")
+        arow = tk.Frame(inner, bg=CARD)
+        arow.pack(fill="x", pady=(10, 0))
+        Pill(arow, "登录并保存", self._do_save_account, accent=True,
+             height=34, width=118).pack(side="left")
+        self.lbl_account_state = tk.Label(inner, text="", bg=CARD, fg=TEXT3,
+                                           font=(FONT, 8), anchor="w",
+                                           justify="left")
+        self.lbl_account_state.pack(fill="x", pady=(8, 0))
+
+        # ---- Token（备用）
+        self._section(inner, "② Bearer Token", "备用，可留空")
+        self._label(inner, "Token（来自糕糕 APP）")
         self.var_token, self.ent_token = self._entry(inner, "", show="•")
         row = tk.Frame(inner, bg=CARD)
         row.pack(fill="x", pady=(8, 0))
-        Pill(row, "校验并保存", self._do_save_token, accent=True, height=32,
-             width=106).pack(side="left")
-        Pill(row, "怎么获取？", self._show_token_help, height=32, width=92).pack(side="left", padx=(8, 0))
+        Pill(row, "校验并保存", self._do_save_token, height=34,
+             width=106, style="ghost").pack(side="left")
+        Pill(row, "怎么获取？", self._show_token_help, height=34,
+             width=92, style="ghost").pack(side="left", padx=(8, 0))
         self.lbl_token_state = tk.Label(inner, text="", bg=CARD, fg=TEXT3,
-                                         font=(FONT, 9), anchor="w", justify="left")
+                                         font=(FONT, 8), anchor="w", justify="left")
         self.lbl_token_state.pack(fill="x", pady=(8, 0))
 
-        tk.Frame(inner, bg=BORDER, height=1).pack(fill="x", pady=14)
-
-        # 手机 IP
-        self._label(inner, "手机 IP（单设备限制下用于自动顶替）")
+        # ---- 单设备限制
+        self._section(inner, "③ 单设备限制")
+        self._label(inner, "手机 IP（用于自动顶替）")
         self.var_phone_ip, _ = self._entry(inner, "")
-        tk.Label(inner, text="填一次即可；手机连校园网时在手机 Wi-Fi 详情里看 IP",
-                 bg=CARD, fg=TEXT3, font=(FONT, 8), anchor="w",
-                 justify="left").pack(fill="x", pady=(4, 0))
+        self._hint(inner, "手机连校园网时，在 Wi-Fi 详情里看 IP。填一次即可。")
 
-        tk.Frame(inner, bg=BORDER, height=1).pack(fill="x", pady=14)
-
-        # 认证网关
-        self._label(inner, "认证网关")
+        # ---- 网关
+        self._section(inner, "④ 认证网关", "换学校才需改")
+        self._label(inner, "主机")
         self.var_host, _ = self._entry(inner, "")
+        self._label(inner, "端口")
         self.var_port, _ = self._entry(inner, "")
-        tk.Label(inner, text="默认 hgs.auth.yungao-tech.com:1110（不同学校请改）",
-                 bg=CARD, fg=TEXT3, font=(FONT, 8), anchor="w").pack(fill="x", pady=(4, 0))
+        self._hint(inner, "默认 hgs.auth.yungao-tech.com:1110")
 
-        tk.Frame(inner, bg=BORDER, height=1).pack(fill="x", pady=14)
-
-        # 账号密码（用于 Token 失效时自动换新 Token）
-        self._label(inner, "账号密码（自动续期，可选）")
-        self.var_mobile, _ = self._entry(inner, "")
-        self.var_pwd, _ = self._entry(inner, "", show="•")
-        tk.Label(inner, text="填了就能在 Token 失效时自动换新，彻底免抓包；密码加密存储",
-                 bg=CARD, fg=TEXT3, font=(FONT, 8), anchor="w",
-                 justify="left").pack(fill="x", pady=(4, 0))
-        arow = tk.Frame(inner, bg=CARD)
-        arow.pack(fill="x", pady=(8, 0))
-        Pill(arow, "登录并保存", self._do_save_account, accent=True,
-             height=32, width=100).pack(side="left")
-
-        tk.Frame(inner, bg=BORDER, height=1).pack(fill="x", pady=14)
-
-        # 开关
+        # ---- 开关
+        self._section(inner, "⑤ 行为开关")
         self.var_autostart = tk.BooleanVar(value=False)
         self.var_kick = tk.BooleanVar(value=True)
         self._check(inner, "开机自动认证", self.var_autostart)
         self._check(inner, "名额被占时自动顶替手机", self.var_kick)
 
-        tk.Frame(inner, bg=BORDER, height=1).pack(fill="x", pady=14)
-
-        row2 = tk.Frame(inner, bg=CARD)
-        row2.pack(fill="x")
-        Pill(row2, "保存设置", self._do_save_settings, height=32, width=100).pack(side="left")
-        Pill(row2, "Token 寿命实验", self._run_tokenlab, height=32, width=118).pack(side="left", padx=(8, 0))
+        # ---- 底部操作条（常驻可见）
+        tk.Frame(inner, bg=BORDER_SOFT, height=1).pack(fill="x", pady=(16, 12))
+        brow = tk.Frame(inner, bg=CARD)
+        brow.pack(fill="x")
+        Pill(brow, "保存设置", self._do_save_settings, accent=True,
+             height=36, width=118).pack(side="left")
+        Pill(brow, "Token 寿命实验", self._run_tokenlab, height=36,
+             width=126, style="ghost").pack(side="left", padx=(8, 0))
 
     def _check(self, parent, text, var):
         cb = tk.Checkbutton(
@@ -446,6 +609,8 @@ class App:
                     self._update_qr_state(payload)
                 elif kind == "token_state":
                     self.lbl_token_state.configure(text=payload, fg=OK_C)
+                elif kind == "heal":
+                    self._update_heal_bar()
                 elif kind == "call":
                     # 后台线程要操作 Tk 控件时，统一经由这里回到主线程
                     try:
@@ -464,25 +629,46 @@ class App:
         self.lbl_info.configure(
             text=(
                 f"认证网关   {self.cfg.base_url}\n"
-                f"本机出口   {ip or '未探测到（可能未连校园网）'}      MAC  {mac or '未探测到'}\n"
-                f"占用名额   {self.cfg.get('last_ip') or ip or '未知'}      "
-                f"Token  {self._token_brief()}\n"
-                f"自动重连   {self._selfheal_brief()}"
+                f"本机出口   {ip or '未探测到（可能未连校园网）'}\n"
+                f"MAC 地址   {mac or '未探测到'}\n"
+                f"占用名额   {self.cfg.get('last_ip') or ip or '未知'}"
             )
         )
+        self._update_heal_bar()
 
-    def _selfheal_brief(self) -> str:
-        """一句话说明自愈能力状态——用户最关心的就是「断了会不会自己接上」。"""
+    def _update_heal_bar(self):
+        """自动重连状态条——用颜色直接告诉用户「断了能不能自己接上」。"""
         has_acct = self.cfg.has_account()
         has_tok = self.cfg.has_token()
         auto = bool(self.cfg.get("autostart"))
+
         if has_acct:
-            base = "已就绪（账号密码自动换 Token）"
+            text = "✔ 自愈已就绪 —— Token 失效会自动换新，断网自动重连"
+            bg, fg = OK_DIM, OK_C
         elif has_tok:
+            text = "◐ 已保存 Token —— 可自动重连，但 Token 失效需重新扫码"
+            bg, fg = WARN_DIM, WARN_C
+        else:
+            text = "✘ 未配置 —— 请填写账号密码，否则断网无法自动重连"
+            bg, fg = ERR_DIM, ERR_C
+
+        if auto:
+            text += "　|　开机自启：已开启"
+        else:
+            text += "　|　开机自启：未开启"
+
+        self.bar_heal.configure(bg=bg)
+        self.lbl_heal.configure(bg=bg, fg=fg, text=text)
+
+    def _selfheal_brief(self) -> str:
+        """一句话说明自愈能力状态。"""
+        if self.cfg.has_account():
+            base = "已就绪（账号密码自动换 Token）"
+        elif self.cfg.has_token():
             base = "已就绪（用现有 Token，失效需重抓）"
         else:
             base = "未就绪（需填账号密码或扫码）"
-        if auto:
+        if bool(self.cfg.get("autostart")):
             base += " · 开机自启已开"
         return base
 
@@ -530,6 +716,7 @@ class App:
         self.log("设置已保存")
         if bool(self.var_autostart.get()):
             self.log("已开启开机自动认证——以后开机和断网都会自动重连")
+        self._update_heal_bar()
         self.q.put(("info", None))
 
     def _do_save_token(self):
@@ -584,6 +771,7 @@ class App:
         self.cfg.set_token(lr.token)
         self.log(f"★ 账号 {mask_mobile(mobile)} 登录成功，Token 已保存（已加密）")
         self.log("账号密码已保存——以后 Token 失效会自动换新的，断网也能自愈")
+        self.q.put(("heal", None))
 
         # 顺手认证一次，确认真的能上网
         ip = self.auth.detect_local_ip()
@@ -1001,44 +1189,82 @@ class App:
     def _show_token_help(self):
         win = tk.Toplevel(self.root)
         win.title("如何获取 Token")
-        win.configure(bg=CARD)
-        win.geometry("560x520")
-        win.resizable(False, False)
-        tk.Label(win, text="获取 Bearer Token", bg=CARD, fg=TEXT,
-                 font=(FONT, 13, "bold")).pack(pady=(20, 4))
-        tk.Label(win, text="云高网页登录流程本身不带 Token，Token 只存在于糕糕 APP 的流量里",
-                 bg=CARD, fg=TEXT3, font=(FONT, 9)).pack()
+        win.configure(bg=BG)
+        win.geometry("620x600")
+        win.minsize(560, 480)
+        win.resizable(True, True)
+        win.transient(self.root)
 
-        body = tk.Frame(win, bg=CARD)
-        body.pack(fill="both", expand=True, padx=26, pady=12)
+        # 顶栏
+        top = tk.Frame(win, bg=BG_GRAD)
+        top.pack(fill="x")
+        tk.Label(top, text="获取 Bearer Token", bg=BG_GRAD, fg=TEXT,
+                 font=(FONT, 13, "bold"), anchor="w").pack(
+                     side="left", padx=20, pady=(16, 2))
+        tk.Label(top, text="Token 只存在于糕糕 APP 的流量里", bg=BG_GRAD,
+                 fg=TEXT3, font=(FONT, 9), anchor="w").pack(
+                     side="left", padx=(0, 20), pady=(18, 2))
+
+        # 主体（可滚动）
+        wrap = tk.Frame(win, bg=BG)
+        wrap.pack(fill="both", expand=True)
+        canvas = tk.Canvas(wrap, bg=BG, highlightthickness=0, bd=0)
+        canvas.pack(side="left", fill="both", expand=True)
+        sb = tk.Scrollbar(wrap, orient="vertical", command=canvas.yview,
+                           width=8, troughcolor=BG, bg=BORDER,
+                           activebackground=ACCENT, bd=0, highlightthickness=0)
+        sb.pack(side="right", fill="y")
+        canvas.configure(yscrollcommand=sb.set)
+        body = tk.Frame(canvas, bg=BG)
+        inner = canvas.create_window((0, 0), window=body, anchor="nw")
+        body.bind("<Configure>",
+                  lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+        canvas.bind("<Configure>",
+                    lambda e: canvas.itemconfigure(inner, width=e.width))
+        for w in (canvas, body):
+            w.bind("<MouseWheel>", lambda e: canvas.yview_scroll(
+                int(-1 * (e.delta / 120)), "units"))
+            w.bind("<Button-4>", lambda e: canvas.yview_scroll(1, "units"))
+            w.bind("<Button-5>", lambda e: canvas.yview_scroll(-1, "units"))
+
+        inner.pack(fill="both", expand=True, padx=24, pady=(14, 10))
+
         steps = [
-            ("方式一 · 安卓 SSL 抓包（推荐）", [
+            ("方式一 · 填账号密码（最省事）", ACCENT, [
+                "在右侧设置区「① 账号密码」填云高手机号和密码，点「登录并保存」。",
+                "程序自己去云高换 Token，之后失效了也会自动换——完全不用抓包。",
+            ]),
+            ("方式二 · 安卓 SSL 抓包", INFO_C, [
                 "1. 安卓手机安装「抓包精灵」或 HttpCanary",
-                "2. 打开它 → 允许安装 CA 证书（设置里选「安装」/「信任」系统证书）",
-                "3. 开始抓包 → 打开「糕糕」APP，等待几秒产生网络请求",
-                "4. 在抓包列表里筛选域名含 auth.yungao 的那条请求",
-                "5. 点开 → 请求头 → Authorization → 复制 Bearer 后面的那段字符串",
-                "6. 粘贴到左边输入框，点「校验并保存」",
+                "2. 打开它 → 允许安装 CA 证书（选「安装」/「信任」系统证书）",
+                "3. 开始抓包 → 打开「糕糕」APP，等几秒产生网络请求",
+                "4. 筛选域名含 yungao-tech 的请求，优先看 hgs.auth.yungao-tech.com",
+                "5. 点开 → 请求头 → 找到 Authorization → 复制 Bearer 后面那段",
+                "6. 粘到「② Bearer Token」输入框 → 点「校验并保存」",
             ]),
-            ("方式二 · 从浏览器复制（不一定可行）", [
-                "网页扫码流程通常不带 Authorization 头，所以这条路多半取不到。",
-                "但如果你在浏览器里看到发往 auth.yungao 的请求带 Bearer，就可以直接复制。",
+            ("抓包时的小坑", WARN_C, [
+                "· 显示「内容已隐藏」→ 点「添加此域名」把它加入解密域名列表",
+                "· 证书固定（pinning）看不到明文 → 换带 SSL Unpinning 的工具",
+                "· 域名不是 auth.yungao，而是 hgs.auth / user.v4 / h5pay 三种",
             ]),
-            ("注意", [
-                "· 不要在 APP 里退出账号，否则 Token 立即失效。",
-                "· Token 可能随「设备登录」轮换；脚本会自动续存，但偶尔仍需重抓。",
-                "· 实在拿不到也没关系：用「扫码登录」按钮，全程不需要 Token。",
+            ("注意事项", ERR_C, [
+                "· 不要在糕糕 APP 里退出账号，退出后 Token 立即失效",
+                "· Token 可能随「设备登录」轮换，程序会自动续存，偶尔仍需重抓",
+                "· 实在拿不到也没关系：「扫码登录」全程不需要 Token",
             ]),
         ]
-        for head, lines in steps:
-            tk.Label(body, text=head, bg=CARD, fg=ACCENT,
+        for head, color, lines in steps:
+            tk.Label(inner, text=head, bg=BG, fg=color,
                      font=(FONT, 10, "bold"), anchor="w",
-                     justify="left").pack(fill="x", pady=(10, 4))
+                     justify="left").pack(fill="x", pady=(12, 6))
             for ln in lines:
-                tk.Label(body, text=ln, bg=CARD, fg=TEXT2, font=(FONT, 9),
-                         anchor="w", justify="left").pack(fill="x")
+                tk.Label(inner, text=ln, bg=BG, fg=TEXT2, font=(FONT, 9),
+                         anchor="w", justify="left").pack(fill="x", pady=1)
 
-        Pill(win, "知道了", win.destroy, accent=True, height=34, width=100).pack(pady=(0, 20))
+        foot = tk.Frame(win, bg=BG)
+        foot.pack(fill="x", pady=(0, 16))
+        Pill(foot, "知道了", win.destroy, accent=True, height=36,
+             width=110).pack()
 
     def _run_tokenlab(self):
         script = Path(__file__).resolve().parent / "tokenlab.py"
