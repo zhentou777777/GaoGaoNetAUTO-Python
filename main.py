@@ -156,7 +156,7 @@ class App:
     def __init__(self, root: tk.Tk, silent: bool = False):
         self.root = root
         self.cfg = Config()
-        self.auth = CampusAuth(self.cfg)
+        self.auth = CampusAuth(self.cfg, logger=self.log)
         self.qr = QrAssistant(self.auth, self.log)
         self.q: "queue.Queue[tuple]" = queue.Queue()
         self._qr_win: Optional[tk.Toplevel] = None
@@ -342,6 +342,20 @@ class App:
 
         tk.Frame(inner, bg=BORDER, height=1).pack(fill="x", pady=14)
 
+        # 账号密码（用于 Token 失效时自动换新 Token）
+        self._label(inner, "账号密码（自动续期，可选）")
+        self.var_mobile, _ = self._entry(inner, "")
+        self.var_pwd, _ = self._entry(inner, "", show="•")
+        tk.Label(inner, text="填了就能在 Token 失效时自动换新，彻底免抓包；密码加密存储",
+                 bg=CARD, fg=TEXT3, font=(FONT, 8), anchor="w",
+                 justify="left").pack(fill="x", pady=(4, 0))
+        arow = tk.Frame(inner, bg=CARD)
+        arow.pack(fill="x", pady=(8, 0))
+        Pill(arow, "登录并保存", self._do_save_account, accent=True,
+             height=32, width=100).pack(side="left")
+
+        tk.Frame(inner, bg=BORDER, height=1).pack(fill="x", pady=14)
+
         # 开关
         self.var_autostart = tk.BooleanVar(value=False)
         self.var_kick = tk.BooleanVar(value=True)
@@ -469,6 +483,58 @@ class App:
         self.log("Token 已加密保存，正在校验…")
         threading.Thread(target=self._check_token_bg, daemon=True).start()
 
+    # ------------------------------------------------------------ 账号密码
+
+    def _do_save_account(self):
+        """用账号密码登录换取 Token，成功后一并保存（免去抓包）。"""
+        mobile = self.var_mobile.get().strip()
+        pwd = self.var_pwd.get()
+        if not mobile or not pwd:
+            self.log("手机号或密码为空，未保存")
+            return
+        self.log("正在用账号密码登录云高…")
+        threading.Thread(
+            target=self._account_login_bg, args=(mobile, pwd), daemon=True
+        ).start()
+
+    def _account_login_bg(self, mobile: str, pwd: str):
+        try:
+            from acclogin import AccountLogin, mask_mobile
+
+            lr = AccountLogin().login(mobile, pwd)
+        except Exception as exc:
+            self.log(f"账号登录异常: {exc}")
+            self.q.put(("status", ("error", "账号登录失败", ERR_C, "")))
+            return
+
+        if not lr.ok:
+            self.log(f"账号登录失败：{lr.message}")
+            self.q.put(("status", ("error", "账号登录失败", ERR_C, "")))
+            return
+
+        if not lr.token:
+            self.log(f"账号登录成功但未取到 Token：{lr.message}")
+            self.q.put(("status", ("error", "未取到 Token", ERR_C, "")))
+            return
+
+        # 保存账号（加密）与新 Token
+        self.cfg.set_account(mobile, pwd)
+        self.cfg.set_token(lr.token)
+        self.log(f"★ 账号 {mask_mobile(mobile)} 登录成功，Token 已保存（已加密）")
+        self.log("账号密码已保存——以后 Token 失效会自动换新的，断网也能自愈")
+
+        # 顺手认证一次，确认真的能上网
+        ip = self.auth.detect_local_ip()
+        res = self.auth.login_chain(ip, lr.token, str(self.cfg.get("phone_ip") or ""),
+                                     bool(self.cfg.get("auto_kick_phone", True)))
+        if res.ok:
+            self.cfg.set("last_ip", ip)
+            self.cfg.set("last_auth_ok", True)
+            self.log(f"认证成功：{res.message}")
+            self.q.put(("status", ("online", "已认证在线", OK_C, f"IP {ip}")))
+        else:
+            self.log(f"Token 已保存，但当前认证未成功：{res.message}")
+
     def _check_token_bg(self):
         ip = self.auth.detect_local_ip()
         res = self.auth.check_token(ip, self.cfg.get_token())
@@ -511,15 +577,34 @@ class App:
             return
         token = self.cfg.get_token()
         if not token:
+            # 没有 Token：若配了账号密码，先自动换一个；否则才降级到扫码
+            if self.cfg.has_account():
+                self.log("没有可用 Token，正在用账号密码自动换取…")
+                try:
+                    from acclogin import AccountLogin, mask_mobile
+
+                    mobile, pwd = self.cfg.get_account()
+                    lr = AccountLogin().login(mobile, pwd)
+                    if lr.ok and lr.token:
+                        self.cfg.set_token(lr.token)
+                        token = lr.token
+                        self.log(f"★ 已换取新 Token（账号 {mask_mobile(mobile)}）")
+                    else:
+                        self.log(f"自动换 Token 失败：{lr.message}")
+                except Exception as exc:
+                    self.log(f"自动换 Token 异常: {exc}")
+
+        if not token:
             self.log("没有 Token，改走扫码流程")
             self.q.put(("call", self._reenable))
             self.q.put(("call", self._open_qr))
             return
 
         self.log(f"开始认证，IP={ip}")
-        res = self.auth.login_chain(
+        res = self.auth.login_chain_self_heal(
             ip, token, str(self.cfg.get("phone_ip") or ""),
             bool(self.cfg.get("auto_kick_phone", True)),
+            self.cfg.get_account(),
         )
 
         # L1 自动续存：服务端下发了新 Token 就立刻换掉
@@ -527,12 +612,29 @@ class App:
             self.cfg.set("token_prev", self.cfg.get("token"))
             self.cfg.set_token(res.new_token)
             self.log("★ 检测到服务端下发了新 Token，已自动续存")
+        elif res.new_token and res.new_token != token:
+            # 自愈换到的新 Token 也要存下来，否则下次又从旧 Token 开始
+            self.cfg.set("token_prev", self.cfg.get("token"))
+            self.cfg.set_token(res.new_token)
+            self.log("★ 新 Token 已保存")
 
         if res.ok:
             self.cfg.set("last_ip", ip)
             self.cfg.set("last_auth_ok", True)
             self.log(f"认证成功：{res.stage or 'OK'} {res.message}")
-            self.q.put(("status", ("online", "已认证在线", OK_C, f"IP {ip}")))
+
+            # 认证成功 ≠ 外网真通（校园网常见 DNS 未生效），
+            # 这里实测一次连通性，不通就如实告诉用户。
+            time.sleep(1.0)
+            from netguard import probe_online
+
+            if probe_online():
+                self.q.put(("status", ("online", "已认证在线", OK_C, f"IP {ip}")))
+            else:
+                self.log("认证已通过，但外网暂时不通——可能是 DNS 未生效，稍后自动重试")
+                self.q.put(("status", ("working", "已认证，外网未通", WARN_C, f"IP {ip}")))
+                # 启动重连循环，等网络真正通
+                self.q.put(("call", lambda: self.guard.start_reconnect()))
         else:
             self.log(f"认证失败：{res.message}")
             if res.stage:
@@ -674,10 +776,16 @@ class App:
         if ev.kind == "offline":
             self.set_status("error", "网络中断", ERR_C, "准备重连")
             self._do_login()
+            # 启动持续重连循环，直到网络真的恢复
+            self.guard.start_reconnect()
+        elif ev.kind == "reconnect":
+            self.log(ev.detail or "重连尝试")
+            self._do_login()
         elif ev.kind == "ip_changed":
             self.log(f"出口 IP 变化，重新认证以免掉线：{ev.ip}")
             self._do_login()
         elif ev.kind == "online":
+            self.guard.stop_reconnect()
             self.q.put(("info", None))
 
     def _startup_checks(self):
@@ -685,9 +793,27 @@ class App:
         if self.cfg.has_token():
             threading.Thread(target=self._check_token_bg, daemon=True).start()
             if self.cfg.get("autostart"):
-                self.log("开机自启已开启，检测到需要认证时自动上线")
+                self.log("开机自启已开启，正在自动认证上线…")
+                # 开机自启场景：网络往往还在协商中，稍等再连
+                self.q.put(("call", lambda: self._delayed_login(8)))
+            else:
+                self.log("已设置 Token，点「立即认证」即可上线")
+        elif self.cfg.has_account():
+            self.log("已配置账号密码，开机自启时会自动登录换取 Token…")
+            if self.cfg.get("autostart"):
+                self.q.put(("call", lambda: self._delayed_login(8)))
+            else:
+                self.log("点「立即认证」即可上线")
         else:
             self.log("尚未设置 Token，可点「扫码登录」先连上网，或点「怎么获取？」查看取 Token 步骤")
+
+    def _delayed_login(self, seconds: int):
+        """延迟若干秒后自动认证（开机时网络尚未就绪）。"""
+        def _worker():
+            time.sleep(seconds)
+            self.q.put(("call", self._do_login))
+
+        threading.Thread(target=_worker, daemon=True).start()
 
     # ------------------------------------------------------------ 开机自启
 

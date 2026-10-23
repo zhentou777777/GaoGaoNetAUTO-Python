@@ -52,6 +52,9 @@ DEFAULTS: Dict[str, Any] = {
     "token": "",
     # 上一版 Token（L1 自动续存失败时可回退）
     "token_prev": "",
+    # 账号密码登录（用于 Token 失效时自动换取新 Token，实现完全自愈）
+    "account_mobile": "",
+    "account_password": "",
     # 行为开关
     "autostart": False,
     "auto_kick_phone": True,
@@ -180,6 +183,22 @@ class Config:
 
     def has_token(self) -> bool:
         return bool(self.get_token())
+
+    # -------------------------------------------------- 账号密码（加密存储）
+
+    def get_account(self) -> tuple[str, str]:
+        """取 (手机号, 密码)。密码与 Token 同样加密存储。"""
+        mobile = str(self.get("account_mobile", "") or "")
+        pwd_blob = str(self.get("account_password", "") or "")
+        return mobile, decrypt_token(pwd_blob)
+
+    def set_account(self, mobile: str, password: str, save: bool = True) -> None:
+        self.set("account_mobile", (mobile or "").strip(), save=False)
+        self.set("account_password", encrypt_token(password or ""), save=save)
+
+    def has_account(self) -> bool:
+        mobile, pwd = self.get_account()
+        return bool(mobile and pwd)
 
     # -------------------------------------------------- 连接信息
 

@@ -53,17 +53,23 @@ class NetGuard:
         interval: int = 20,
         logger: Optional[Callable[[str], None]] = None,
         on_event: Optional[Callable[[GuardEvent], None]] = None,
+        retry_base: int = 15,
+        retry_max: int = 120,
     ):
         self.auth = auth
         self.interval = interval
         self.log = logger or (lambda *a, **k: None)
         self.on_event = on_event or (lambda e: None)
+        self.retry_base = retry_base
+        self.retry_max = retry_max
         self._stop = threading.Event()
         self._thread: Optional[threading.Thread] = None
+        self._reconnect_thread: Optional[threading.Thread] = None
         self._lock = threading.Lock()
         self.last_ip = ""
         self.online = False
         self._fail_streak = 0
+        self._reconnecting = False
 
     # ------------------------------------------------------------ 生命周期
 
@@ -76,6 +82,21 @@ class NetGuard:
 
     def stop(self) -> None:
         self._stop.set()
+
+    def start_reconnect(self) -> None:
+        """启动断线重连循环（幂等）。"""
+        with self._lock:
+            if self._reconnecting:
+                return
+            self._reconnecting = True
+        self._reconnect_thread = threading.Thread(
+            target=self._reconnect_loop, name="reconnect", daemon=True
+        )
+        self._reconnect_thread.start()
+
+    def stop_reconnect(self) -> None:
+        with self._lock:
+            self._reconnecting = False
 
     # ------------------------------------------------------------ 主循环
 
@@ -120,3 +141,32 @@ class NetGuard:
             if self._fail_streak >= 2 and was_online:
                 self.log("检测到断网，准备重新认证")
                 self.on_event(GuardEvent("offline", "网络中断", ip))
+
+    # ------------------------------------------------------------ 断线重连
+
+    def _reconnect_loop(self) -> None:
+        """断网后的重连循环：指数退避重试，直到网络恢复。
+
+        与 NetGuard 的职责分工：
+            - NetGuard 负责**发现**断网与 IP 漂移
+            - 本循环负责**持续重试**，避免只试一次就放弃
+        """
+        attempt = 0
+        while not self._stop.is_set():
+            # 等网络先恢复一点，再试
+            self._stop.wait(self.retry_base)
+
+            if probe_online():
+                self.log("网络已恢复，结束重连循环")
+                return
+
+            attempt += 1
+            delay = min(self.retry_base * (2 ** (attempt - 1)), self.retry_max)
+            self.log(f"第 {attempt} 次重连尝试（{self.retry_base}s 间隔）")
+            try:
+                self.on_event(GuardEvent("reconnect", f"第 {attempt} 次重连尝试", ""))
+            except Exception as exc:
+                self.log(f"重连回调异常: {exc}")
+
+            # 退避等待，同时随时可被停止
+            self._stop.wait(min(delay, self.retry_max))

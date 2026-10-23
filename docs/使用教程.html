@@ -102,14 +102,51 @@ tr:nth-child(even) td{background:rgba(255,255,255,.015)}
 <p class="sub">云高（广州云糕科技）统一认证平台 · Windows 桌面工具</p>
 <blockquote><p>适用于云高（广州云糕科技）统一认证平台的 Windows 桌面工具。</p><p>目标：一台电脑接入校园网后<strong>不用再掏手机</strong>，开机、断网、重连全部自动完成。</p></blockquote>
 <hr>
-<div class="toc"><h2>目录</h2><ol><li><a href="#三十秒速览">三十秒速览</a></li><li><a href="#第一步-下载与运行">第一步：下载与运行</a></li><li><a href="#第二步-先连上校园网">第二步：先连上校园网</a></li><li><a href="#第三步-扫码登录-第一次一定要做">第三步：扫码登录（第一次一定要做）</a></li><li><a href="#第四步-抓取-token-实现永久免手机">第四步：抓取 Token，实现永久免手机</a></li><li><a href="#第五步-设置开机自启">第五步：设置开机自启</a></li><li><a href="#界面详解">界面详解</a></li><li><a href="#单设备限制-手机和电脑不能同时上">单设备限制：手机和电脑不能同时上</a></li><li><a href="#遇到问题怎么办">遇到问题怎么办</a></li><li><a href="#进阶玩法">进阶玩法</a></li><li><a href="#附-配置文件说明">附：配置文件说明</a></li><li><a href="#一句话总结">一句话总结</a></li></ol></div><h2 id="目录">目录</h2>
-<ul><li><a href="#三十秒速览" target="_blank" rel="noopener">三十秒速览</a></li><li><a href="#第一步下载与运行" target="_blank" rel="noopener">第一步：下载与运行</a></li><li><a href="#第二步先连上校园网" target="_blank" rel="noopener">第二步：先连上校园网</a></li><li><a href="#第三步扫码登录第一次一定要做" target="_blank" rel="noopener">第三步：扫码登录（第一次一定要做）</a></li><li><a href="#第四步抓取-token实现永久免手机" target="_blank" rel="noopener">第四步：抓取 Token，实现永久免手机</a></li><li><a href="#第五步设置开机自启" target="_blank" rel="noopener">第五步：设置开机自启</a></li><li><a href="#界面详解" target="_blank" rel="noopener">界面详解</a></li><li><a href="#单设备限制手机和电脑不能同时上" target="_blank" rel="noopener">单设备限制：手机和电脑不能同时上</a></li><li><a href="#遇到问题怎么办" target="_blank" rel="noopener">遇到问题怎么办</a></li><li><a href="#进阶玩法" target="_blank" rel="noopener">进阶玩法</a></li><li><a href="#附配置文件说明" target="_blank" rel="noopener">附：配置文件说明</a></li></ul>
+<div class="toc"><h2>目录</h2><ol><li><a href="#三十秒速览">三十秒速览</a></li><li><a href="#你要的功能-开机自启-断网重连">你要的功能：开机自启 + 断网重连</a></li><li><a href="#第一步-下载与运行">第一步：下载与运行</a></li><li><a href="#第二步-先连上校园网">第二步：先连上校园网</a></li><li><a href="#第三步-扫码登录-第一次一定要做">第三步：扫码登录（第一次一定要做）</a></li><li><a href="#第四步-填账号密码-实现永久免手机">第四步：填账号密码，实现永久免手机</a></li><li><a href="#第五步-设置开机自启">第五步：设置开机自启</a></li><li><a href="#界面详解">界面详解</a></li><li><a href="#单设备限制-手机和电脑不能同时上">单设备限制：手机和电脑不能同时上</a></li><li><a href="#遇到问题怎么办">遇到问题怎么办</a></li><li><a href="#进阶玩法">进阶玩法</a></li><li><a href="#附-配置文件说明">附：配置文件说明</a></li><li><a href="#一句话总结">一句话总结</a></li></ol></div><h2 id="目录">目录</h2>
+<ul><li><a href="#三十秒速览" target="_blank" rel="noopener">三十秒速览</a></li><li><a href="#你要的功能开机自启--断网重连" target="_blank" rel="noopener">你要的功能：开机自启 + 断网重连</a></li><li><a href="#第一步下载与运行" target="_blank" rel="noopener">第一步：下载与运行</a></li><li><a href="#第二步先连上校园网" target="_blank" rel="noopener">第二步：先连上校园网</a></li><li><a href="#第三步扫码登录第一次一定要做" target="_blank" rel="noopener">第三步：扫码登录（第一次一定要做）</a></li><li><a href="#第四步填账号密码实现永久免手机" target="_blank" rel="noopener">第四步：填账号密码，实现永久免手机</a></li><li><a href="#第五步设置开机自启" target="_blank" rel="noopener">第五步：设置开机自启</a></li><li><a href="#界面详解" target="_blank" rel="noopener">界面详解</a></li><li><a href="#单设备限制手机和电脑不能同时上" target="_blank" rel="noopener">单设备限制：手机和电脑不能同时上</a></li><li><a href="#遇到问题怎么办" target="_blank" rel="noopener">遇到问题怎么办</a></li><li><a href="#进阶玩法" target="_blank" rel="noopener">进阶玩法</a></li><li><a href="#附配置文件说明" target="_blank" rel="noopener">附：配置文件说明</a></li></ul>
 <hr>
 <h2 id="三十秒速览">三十秒速览</h2>
 <p>如果你只想赶紧用上：</p>
 <ol><li>下载 <code>GaoGaoNetAUTO.exe</code>，双击运行</li><li><strong>确保手机或电脑已连上校园网 Wi-Fi</strong></li><li>点 <strong>「扫码登录」</strong> → 用手机上的 <strong>糕糕 APP</strong> 扫一下 → 电脑上立刻就联网了</li></ol>
 <p>搞定。这一步不需要任何 Token、不需要抓包、也不需要配置。</p>
 <p>之后想彻底不掏手机，再往下看第四节。</p>
+<hr>
+<h2 id="你要的功能-开机自启-断网重连">你要的功能：开机自启 + 断网重连</h2>
+<p>这是本工具的主功能。配好一次，之后<strong>完全不用管</strong>。</p>
+<h3>三步配置</h3>
+<ol><li><strong>设置区填账号密码</strong> → 点「登录并保存」</li></ol>
+<p>（没有账号密码也行：扫码登录一次，把 Token 存下来）</p>
+<ol><li>勾选 <strong>「开机自动认证」</strong> → 点「保存设置」</li><li>完事</li></ol>
+<h3>之后它会自动做什么</h3>
+<table><thead><tr>
+<th>场景</th>
+<th>程序的动作</th>
+</tr></thead><tbody>
+<tr>
+<td><strong>开机</strong></td>
+<td>注册表 <code>Run</code> 项静默启动 → 等 8 秒让网络就绪 → 自动认证上线</td>
+</tr>
+<tr>
+<td><strong>断网 / 换网络</strong></td>
+<td>守护线程每 20 秒探测一次；发现断网后<strong>指数退避持续重试</strong>（15s → 30s → 60s → 120s 封顶），一直到恢复</td>
+</tr>
+<tr>
+<td><strong>出口 IP 变化</strong></td>
+<td>校园网重新分配 IP 会让旧授权失效 → 检测到立即重新认证</td>
+</tr>
+<tr>
+<td><strong>Token 被服务端轮换</strong></td>
+<td>自动用账号密码换一个新 Token → 重新认证 → 存回本地</td>
+</tr>
+<tr>
+<td><strong>认证成功但外网还是不通</strong></td>
+<td>实测连通性，如实提示并继续重试（校园网 DNS 未生效的常见坑）</td>
+</tr>
+</tbody></table>
+<h3>为什么&quot;扫码登录&quot;撑不过一晚上？</h3>
+<p>这是很多人会困惑的点，说清楚：</p>
+<blockquote><p>扫码只是让服务端把<strong>当前这一台设备</strong>放行<strong>一次</strong>。</p><p>这个会话有有效期，网络断了、或校园网那边会话超时，就得重来。</p><p>要真正做到&quot;开机就连、断网自愈&quot;，手里必须有一个<strong>能自己续期的 Token</strong>。</p><p>两种获得它的方式：</p><p>- <strong>填账号密码</strong>（推荐）→ 程序自己去云高换一个，永久免抓包</p><p>- <strong>抓一次包</strong> → 手动存 Token，但 Token 失效时仍需重新抓</p></blockquote>
+<p>所以<strong>第四步的账号密码是关键</strong>，别跳过。</p>
 <hr>
 <h2 id="第一步-下载与运行">第一步：下载与运行</h2>
 <h3>下载</h3>
@@ -166,11 +203,62 @@ tr:nth-child(even) td{background:rgba(255,255,255,.015)}
 <p><strong>PC 认证成功后，手机上的校园网会掉线。</strong> 这是学校账号「同时只能一台设备在线」的限制导致的，不是程序 bug。</p>
 <p>想让手机也上，用主窗口的 <strong>「归还名额」</strong> 按钮把位置让回给手机。</p>
 <hr>
-<h2 id="第四步-抓取-token-实现永久免手机">第四步：抓取 Token，实现永久免手机</h2>
-<p>扫码每次都要掏手机。要彻底摆脱，得把 Token 存到电脑上。</p>
-<h3>为什么必须抓包</h3>
-<p>云高网页登录流程本身<strong>不带 <code>Authorization</code> 头</strong>，所以从浏览器 DevTools 复制这条路多半取不到。<strong>Token 只存在于糕糕 APP 的网络流量里</strong>。</p>
-<p>好消息是：<strong>Token 只需抓一次</strong>。抓完之后，所有后续认证都由程序自己完成，手机彻底不参与。</p>
+<h2 id="第四步-填账号密码-实现永久免手机">第四步：填账号密码，实现永久免手机</h2>
+<p>这是让&quot;断网自动重连&quot;真正能闭环的一步。</p>
+<h3>云高的登录接口</h3>
+<p>程序逆向出了云高统一用户中心的登录接口：</p>
+<pre><code>POST https://user.v4.yungao-tech.com/api/login
+Content-Type: application/json
+
+{&quot;mobile&quot;: &quot;&lt;手机号&gt;&quot;, &quot;password&quot;: &quot;&lt;密码&gt;&quot;}</code></pre>
+<p><strong>云高账号体系里，手机号就是登录名。</strong></p>
+<h3>怎么填</h3>
+<ol><li>主窗口<strong>设置区</strong>找到「账号密码（自动续期，可选）」</li><li>填<strong>手机号</strong>和<strong>密码</strong></li><li>点 <strong>「登录并保存」</strong></li></ol>
+<p>日志出现这几行就说明成功了：</p>
+<pre><code>正在用账号密码登录云高…
+★ 账号 138****8888 登录成功，Token 已保存（已加密）
+账号密码已保存——以后 Token 失效会自动换新的，断网也能自愈</code></pre>
+<p>密码和 Token 用同一套加密方案（机器指纹派生密钥 + HMAC 校验）存在 <code>config.json</code> 里， <strong>文件里是密文，换一台电脑解不开</strong>。</p>
+<h3>不想在程序里填？先单独测一下</h3>
+<p>怕填错、或想知道云高是否认你的账号，可以先在命令行测（<strong>不会保存任何东西</strong>）：</p>
+<pre><code>python login_check.py &lt;手机号&gt; &lt;密码&gt;</code></pre>
+<p>它会打印服务端原始应答和错误分类。</p>
+<h3>各种错误的含义</h3>
+<table><thead><tr>
+<th>程序提示</th>
+<th>含义</th>
+<th>怎么办</th>
+</tr></thead><tbody>
+<tr>
+<td>账号不存在</td>
+<td>该手机号在云高没注册</td>
+<td>确认云高账号是不是手机号；不是的话改用下面的抓包方式</td>
+</tr>
+<tr>
+<td>手机号格式不正确</td>
+<td>手机号格式错</td>
+<td>填 11 位手机号</td>
+</tr>
+<tr>
+<td>密码错误</td>
+<td>密码不对</td>
+<td>检查一下</td>
+</tr>
+<tr>
+<td>接口参数不匹配</td>
+<td>云高改了登录接口</td>
+<td>用抓包兜底</td>
+</tr>
+<tr>
+<td>需要图形/短信验证码</td>
+<td>该接口不支持直接登录</td>
+<td>用抓包兜底</td>
+</tr>
+</tbody></table>
+<blockquote><p><strong>如果你的校园网账号是学号而不是手机号</strong>，「账号不存在」是正常的。</p><p>这时走下面的抓包方式拿 Token，功能一样，只是 Token 失效时需要手动重抓。</p></blockquote>
+<h3>备用方案：抓包取 Token</h3>
+<p>实在填不了账号密码，还有这条路。</p>
+<blockquote><p>云高网页登录流程本身<strong>不带</strong> <code>Authorization</code> 头，所以<strong>从浏览器 DevTools 复制这条路多半取不到</strong>。</p><p>Token 只存在于糕糕 APP 的网络流量里。</p></blockquote>
 <h3>安卓抓包步骤</h3>
 <ol><li>安卓手机安装 <strong>抓包精灵</strong> 或 <strong>HttpCanary</strong>（任选其一）</li><li>打开抓包工具 → 允许安装 CA 证书</li><li>抓包精灵：设置 → 证书安装 → 选「系统证书」（部分机型还要去系统设置里手动信任）</li><li>HttpCanary：设置 → 证书 → 安装</li><li>开始抓包 → 打开<strong>糕糕 APP</strong>，等几秒让它产生网络请求</li><li>在抓包列表里按域名筛选。云高 APP 会访问这几个域名，<strong>带 <code>Authorization</code> 头的都在里面</strong>：</li></ol>
 <table><thead><tr>
@@ -322,7 +410,12 @@ tr:nth-child(even) td{background:rgba(255,255,255,.015)}
 <tr>
 <td>Bearer Token（来自糕糕 APP）</td>
 <td>抓包拿到的 <code>Bearer</code> 后面那串</td>
-<td>想免手机时填</td>
+<td>账号密码登录不了时，用抓包兜底</td>
+</tr>
+<tr>
+<td>账号密码（自动续期，可选）</td>
+<td>云高手机号 + 密码</td>
+<td><strong>想实现断网自动重连就填这个</strong></td>
 </tr>
 <tr>
 <td>手机 IP</td>
@@ -375,6 +468,10 @@ logout?ip=&lt;手机IP&gt; → auth?ip=      自动顶替手机（需先填手�
 <ul><li>确认已连上校园网（看状态卡的出口 IP 有没有值）</li><li>二维码是 10 分钟有效，旧的点「刷新」</li><li>试试点「立即认证」看日志报什么</li></ul>
 <h3>Q：认证成功了但电脑还是上不了网</h3>
 <ul><li>看状态点是不是绿的。绿点但浏览器打不开网页，可能是 DNS 问题，试试 <code>8.8.8.8</code> / <code>114.114.114.114</code></li><li>退出重开浏览器（某些校园网需要重新走一次代理）</li></ul>
+<h3>Q：扫码登录之后过一会儿又掉线了？</h3>
+<p>这是<strong>预期行为</strong>，不是 bug。扫码只是让服务端放行<strong>当前这一台设备一次</strong>， 会话有有效期。要真正做到&quot;开机就连、断网自愈&quot;， 必须填<strong>账号密码</strong>（第四步），让程序能自己换 Token。</p>
+<h3>Q：填账号密码后提示&quot;账号不存在&quot;？</h3>
+<p>说明你的云高账号不是手机号（可能是学号），或者没在云高平台注册。 改用「扫码登录」+ 抓包取 Token 也能实现自动重连， 只是 Token 被轮换时需要手动重抓一次。</p>
 <h3>Q：Token 提示失效</h3>
 <p>两种原因，处理不同：</p>
 <table><thead><tr>

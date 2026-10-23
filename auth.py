@@ -46,6 +46,8 @@ _TOKEN_BAD_WORDS = (
     "token无效", "token invalid", "invalid token", "token已失效", "token失效",
     "token过期", "token expired", "未登录", "登录已失效", "请重新登录",
     "认证已失效", "凭证无效", "unauthorized", "forbidden", "token错误",
+    # 云高统一的失效应答：{"code":410,"msg":"登录状态已失效，您的账号可能在别处登录。"}
+    "登录状态已失效", "账号可能在别处登录", "登录状态失效", "登录已过期",
 )
 _DEVICE_LIMIT_WORDS = (
     "设备已满", "设备数量", "超出设备", "设备上限", "最多允许", "设备受限",
@@ -79,9 +81,10 @@ class AuthResult:
 class CampusAuth:
     """云高统一认证客户端。"""
 
-    def __init__(self, cfg, timeout: int = 8):
+    def __init__(self, cfg, timeout: int = 8, logger=None):
         self.cfg = cfg
         self.timeout = timeout
+        self.log = logger or (lambda *a, **k: None)
         self._session = requests.Session() if requests else None
         if self._session:
             self._session.headers.update({"User-Agent": USER_AGENT})
@@ -251,6 +254,9 @@ class CampusAuth:
             if code in (0, "0", 200, "200") and success is not False:
                 return OK, msg or "认证成功"
             if code is not None:
+                # 云高用 410 统一表示"登录状态已失效"（Token 过期/未认证）
+                if code in (410, "410"):
+                    return TOKEN_INVALID, msg or "登录状态已失效"
                 low_msg = msg.lower()
                 if any(w in msg for w in _TOKEN_BAD_WORDS) or any(
                     w in low_msg for w in _TOKEN_BAD_WORDS
@@ -465,6 +471,74 @@ class CampusAuth:
             stage="token 健康检查",
             http_code=code,
         )
+
+    # ------------------------------------------------------------ 自愈认证
+
+    def login_chain_self_heal(
+        self,
+        ip: str,
+        token: str,
+        phone_ip: str = "",
+        kick_phone: bool = True,
+        account: Tuple[str, str] = ("", ""),
+    ) -> AuthResult:
+        """四级认证链 + 账号密码兜底换 Token。
+
+        这是「开机自启 / 断网自动重连」真正闭环的关键：
+        光重放旧 Token，在 Token 被服务端轮换后会一直失败；
+        只有能**自己换到一个新 Token** 才叫自愈。
+
+        流程：
+            1) 四级认证链（直连 → 清理本机会话 → 顶替手机）
+            2) 若失败且判定为 Token 失效 → 用账号密码换新 Token → 重跑认证链
+        """
+        res = self.login_chain(ip, token, phone_ip, kick_phone)
+
+        if res.ok:
+            return res
+
+        # 只有 Token 失效才值得换新 Token
+        if res.status != TOKEN_INVALID:
+            return res
+
+        mobile, password = account
+        if not mobile or not password:
+            res.message = (
+                "Token 已失效，且未配置账号密码 → "
+                "请在设置里填账号密码以实现自动续期，或用「扫码登录」"
+            )
+            return res
+
+        try:
+            from acclogin import AccountLogin, mask_mobile
+
+            self.log(f"Token 已失效，尝试用账号 {mask_mobile(mobile)} 换取新 Token…")
+            lr = AccountLogin().login(mobile, password)
+        except Exception as exc:
+            res.message = f"Token 已失效，且自动换 Token 失败: {exc}"
+            return res
+
+        if not lr.ok:
+            res.message = f"Token 已失效，自动换 Token 失败：{lr.message}"
+            res.stage = (res.stage + " | " if res.stage else "") + "换 Token 失败"
+            return res
+
+        if not lr.token:
+            res.message = "Token 已失效，自动换 Token 失败：响应中没有 Token 字段"
+            return res
+
+        self.log("★ 已用账号密码换取新 Token，重新认证…")
+        res2 = self.login_chain(ip, lr.token, phone_ip, kick_phone)
+        if res2.ok:
+            res2.stage = "Token 失效→自动换新 Token→认证成功"
+            res2.new_token = lr.token
+            return res2
+
+        res2.message = f"已换取新 Token 但认证仍失败：{res2.message}"
+        res2.stage = ("Token 失效→自动换新 Token→仍失败 | "
+                      + (res2.stage or ""))
+        res2.new_token = lr.token
+        return res2
 
 
 def uuid_getnode() -> int:
