@@ -102,7 +102,7 @@ tr:nth-child(even) td{background:rgba(255,255,255,.015)}
 <p class="sub">怎么用：下载、配置、开机自启、断网重连、故障排查</p>
 <blockquote><p>适用于云高（广州云糕科技）统一认证平台的 Windows 桌面工具。</p><p>目标：一台电脑接入校园网后<strong>不用再掏手机</strong>，开机、断网、重连全部自动完成。</p></blockquote>
 <hr>
-<div class="toc"><h2>目录</h2><ol><li><a href="#三十秒速览">三十秒速览</a></li><li><a href="#你要的功能-开机自启-断网重连">你要的功能：开机自启 + 断网重连</a></li><li><a href="#第一步-下载与运行">第一步：下载与运行</a></li><li><a href="#第二步-先连上校园网">第二步：先连上校园网</a></li><li><a href="#第三步-扫码登录-第一次一定要做">第三步：扫码登录（第一次一定要做）</a></li><li><a href="#第四步-填账号密码-实现永久免手机">第四步：填账号密码，实现永久免手机</a></li><li><a href="#第五步-设置开机自启">第五步：设置开机自启</a></li><li><a href="#界面详解">界面详解</a></li><li><a href="#单设备限制-手机和电脑不能同时上">单设备限制：手机和电脑不能同时上</a></li><li><a href="#遇到问题怎么办">遇到问题怎么办</a></li><li><a href="#进阶玩法">进阶玩法</a></li><li><a href="#附-配置文件说明">附：配置文件说明</a></li><li><a href="#一句话总结">一句话总结</a></li></ol></div><h2 id="目录">目录</h2>
+<div class="toc"><h2>目录</h2><ol><li><a href="#三十秒速览">三十秒速览</a></li><li><a href="#你要的功能-开机自启-断网重连">你要的功能：开机自启 + 断网重连</a></li><li><a href="#第一步-下载与运行">第一步：下载与运行</a></li><li><a href="#第二步-先连上校园网">第二步：先连上校园网</a></li><li><a href="#第三步-扫码登录-第一次一定要做">第三步：扫码登录（第一次一定要做）</a></li><li><a href="#第四步-填账号密码-实现永久免手机">第四步：填账号密码，实现永久免手机</a></li><li><a href="#第五步-设置开机自启">第五步：设置开机自启</a></li><li><a href="#界面详解">界面详解</a></li><li><a href="#想让手机和电脑同时上网-不挤掉手机">想让手机和电脑同时上网（不挤掉手机）</a></li><li><a href="#单设备限制-手机和电脑不能同时上">单设备限制：手机和电脑不能同时上</a></li><li><a href="#遇到问题怎么办">遇到问题怎么办</a></li><li><a href="#进阶玩法">进阶玩法</a></li><li><a href="#附-配置文件说明">附：配置文件说明</a></li><li><a href="#一句话总结">一句话总结</a></li></ol></div><h2 id="目录">目录</h2>
 <ul><li><a href="#三十秒速览" target="_blank" rel="noopener">三十秒速览</a></li><li><a href="#你要的功能开机自启--断网重连" target="_blank" rel="noopener">你要的功能：开机自启 + 断网重连</a></li><li><a href="#第一步下载与运行" target="_blank" rel="noopener">第一步：下载与运行</a></li><li><a href="#第二步先连上校园网" target="_blank" rel="noopener">第二步：先连上校园网</a></li><li><a href="#第三步扫码登录第一次一定要做" target="_blank" rel="noopener">第三步：扫码登录（第一次一定要做）</a></li><li><a href="#第四步填账号密码实现永久免手机" target="_blank" rel="noopener">第四步：填账号密码，实现永久免手机</a></li><li><a href="#第五步设置开机自启" target="_blank" rel="noopener">第五步：设置开机自启</a></li><li><a href="#界面详解" target="_blank" rel="noopener">界面详解</a></li><li><a href="#单设备限制手机和电脑不能同时上" target="_blank" rel="noopener">单设备限制：手机和电脑不能同时上</a></li><li><a href="#遇到问题怎么办" target="_blank" rel="noopener">遇到问题怎么办</a></li><li><a href="#进阶玩法" target="_blank" rel="noopener">进阶玩法</a></li><li><a href="#附配置文件说明" target="_blank" rel="noopener">附：配置文件说明</a></li></ul>
 <hr>
 <h2 id="三十秒速览">三十秒速览</h2>
@@ -352,6 +352,10 @@ Content-Type: application/json
 <td><strong>检查 Token</strong></td>
 <td>体检一下 Token 还有没有效，不影响当前连接</td>
 </tr>
+<tr>
+<td><strong>在线设备</strong></td>
+<td>打开设备管理窗口：看谁在线、一键下线某台设备</td>
+</tr>
 </tbody></table>
 <h3>日志怎么看</h3>
 <p>日志是这个工具最有价值的部分，<strong>出问题时先看它</strong>。典型信息：</p>
@@ -439,6 +443,26 @@ Content-Type: application/json
 </tr>
 </tbody></table>
 <blockquote><p><strong>网关地址怎么查？</strong></p><p>学校发的校园网使用说明里，或者你在浏览器访问认证页面时看地址栏。</p><p>格式是 <code>主机名:端口</code>，端口通常是 <code>1110</code>。</p></blockquote>
+<hr>
+<h2 id="想让手机和电脑同时上网-不挤掉手机">想让手机和电脑同时上网（不挤掉手机）</h2>
+<p>学校的套餐通常只允许<strong>一台设备</strong>在线。服务端按<strong>出口 IP</strong> 记录在线设备， 所以 PC 认证会把手机挤下线。</p>
+<h3>方案 A：让电脑连手机热点（推荐）</h3>
+<p>两台设备共用同一个出口 IP，服务端就只看到&quot;一台设备&quot;：</p>
+<pre><code>手机连校园网 Wi-Fi  →  手机开热点  →  电脑连手机热点
+                                          ↓
+                        对外是同一个出口 IP，只需认证一次</code></pre>
+<p>这样<strong>手机和电脑同时在线</strong>，互不干扰。</p>
+<p>程序会自动识别这种情况：认证前先查在线设备列表， 发现本机出口 IP 已经在列表里就直接判定&quot;已在线&quot;， <strong>不会执行任何下线动作</strong>，所以不会把手机踢掉。</p>
+<blockquote><p>日志里会看到：<code>共享模式：检测到本机已在线</code></p></blockquote>
+<h3>方案 B：手动切换谁在线</h3>
+<p>不想用热点时，点主窗口的 <strong>「在线设备」</strong> 按钮：</p>
+<ul><li>绿点 = 本机，黄点 = 其他设备</li><li>点其他设备那行的 <strong>「下线这台」</strong>，把名额抢过来</li><li>点主窗口的 <strong>「归还名额」</strong>，把位置让回手机</li></ul>
+<p>程序<strong>默认不会自动顶替手机</strong>了（设置里的「名额被占时自动顶替手机」默认关闭）， 避免莫名其妙把手机挤掉。需要自动抢名额时再去设置里手动打开。</p>
+<h3>方案 C：看状态卡上的「在线设备」那一行</h3>
+<p>主窗口状态卡现在会实时显示在线设备，例如：</p>
+<pre><code>在线设备   电脑有线 10.135.130.202（本机）
+在线设备   手机 WIFI 10.135.130.111</code></pre>
+<p>一眼看出名额被谁占着。</p>
 <hr>
 <h2 id="单设备限制-手机和电脑不能同时上">单设备限制：手机和电脑不能同时上</h2>
 <p>云高账号<strong>同时只能有一台设备在线</strong>。所以：</p>

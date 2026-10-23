@@ -57,7 +57,9 @@ DEFAULTS: Dict[str, Any] = {
     "account_password": "",
     # 行为开关
     "autostart": False,
-    "auto_kick_phone": True,
+    # 默认不顶替手机——单设备套餐下顶掉手机会让人很困扰，
+    # 需要独占时可在设置里手动打开。
+    "auto_kick_phone": False,
     "keep_token_alive": True,
     # 抓取模式发现的接口模板（可为空）
     "status_url": "",

@@ -430,6 +430,8 @@ class App:
              style="ghost", icon="↩").pack(side="left", padx=(10, 0))
         Pill(bar, "检查 Token", self._do_check_token, height=42, width=134,
              style="ghost", icon="✓").pack(side="left", padx=(10, 0))
+        Pill(bar, "在线设备", self._do_show_devices, height=42, width=126,
+             style="ghost", icon="▤").pack(side="left", padx=(10, 0))
 
     def _build_log(self, parent):
         wrap = tk.Frame(parent, bg=BG)
@@ -549,9 +551,9 @@ class App:
         # ---- 开关
         self._section(inner, "⑤ 行为开关")
         self.var_autostart = tk.BooleanVar(value=False)
-        self.var_kick = tk.BooleanVar(value=True)
+        self.var_kick = tk.BooleanVar(value=False)
         self._check(inner, "开机自动认证", self.var_autostart)
-        self._check(inner, "名额被占时自动顶替手机", self.var_kick)
+        self._check(inner, "名额被占时自动顶替手机（会挤掉手机，慎开）", self.var_kick)
 
         # ---- 底部操作条（常驻可见）
         tk.Frame(inner, bg=BORDER_SOFT, height=1).pack(fill="x", pady=(16, 12))
@@ -631,10 +633,19 @@ class App:
                 f"认证网关   {self.cfg.base_url}\n"
                 f"本机出口   {ip or '未探测到（可能未连校园网）'}\n"
                 f"MAC 地址   {mac or '未探测到'}\n"
-                f"占用名额   {self.cfg.get('last_ip') or ip or '未知'}"
+                f"占用名额   {self.cfg.get('last_ip') or ip or '未知'}\n"
+                f"在线设备   {self._devices_brief()}"
             )
         )
         self._update_heal_bar()
+
+    def _devices_brief(self) -> str:
+        """在线设备一行摘要——单设备套餐下这一行最关键。"""
+        try:
+            return self.auth.describe_devices(self.cfg.get_token(),
+                                             self.auth.detect_local_ip())
+        except Exception:
+            return "查询失败"
 
     def _update_heal_bar(self):
         """自动重连状态条——用颜色直接告诉用户「断了能不能自己接上」。"""
@@ -899,6 +910,126 @@ class App:
                 self.q.put(("status", ("error", "认证失败", ERR_C, "")))
         self.q.put(("info", None))
         self.q.put(("call", self._reenable))
+
+    def _do_show_devices(self):
+        """打开「在线设备」窗口：查看谁在占用名额，一键下线。"""
+        win = tk.Toplevel(self.root)
+        win.title("在线设备")
+        win.configure(bg=BG)
+        win.geometry("520x420")
+        win.minsize(440, 340)
+        win.resizable(True, True)
+        win.transient(self.root)
+
+        head = tk.Frame(win, bg=BG_GRAD)
+        head.pack(fill="x")
+        tk.Label(head, text="在线设备", bg=BG_GRAD, fg=TEXT,
+                 font=(FONT, 13, "bold"), anchor="w").pack(
+                     side="left", padx=20, pady=(16, 2))
+        tk.Label(head, text="套餐通常只允许一台设备在线", bg=BG_GRAD, fg=TEXT3,
+                 font=(FONT, 9), anchor="w").pack(
+                     side="left", padx=(0, 20), pady=(18, 2))
+
+        body = tk.Frame(win, bg=BG)
+        body.pack(fill="both", expand=True, padx=20, pady=16)
+
+        self._dev_list = tk.Frame(body, bg=BG)
+        self._dev_list.pack(fill="both", expand=True)
+
+        self._dev_hint = tk.Label(
+            body, text="", bg=BG, fg=TEXT2, font=(FONT, 9),
+            anchor="w", justify="left")
+        self._dev_hint.pack(fill="x", pady=(12, 0))
+
+        foot = tk.Frame(win, bg=BG)
+        foot.pack(fill="x", padx=20, pady=(0, 16))
+        Pill(foot, "刷新", self._refresh_devices, height=34, width=96,
+             style="ghost").pack(side="left")
+        Pill(foot, "关闭", win.destroy, height=34, width=96).pack(
+            side="left", padx=(8, 0))
+
+        self._dev_win = win
+        self._refresh_devices()
+
+    def _refresh_devices(self):
+        """查询并渲染在线设备列表。"""
+        if not hasattr(self, "_dev_list"):
+            return
+        for w in self._dev_list.winfo_children():
+            w.destroy()
+
+        ip = self.auth.detect_local_ip()
+        token = self.cfg.get_token()
+        devices = []
+        err = ""
+        try:
+            devices = self.auth.online_devices(token)
+        except Exception as exc:
+            err = str(exc)
+
+        if not devices:
+            tk.Label(self._dev_list, text="当前没有设备在线", bg=BG,
+                     fg=TEXT3, font=(FONT, 10)).pack(anchor="w")
+            self._dev_hint.configure(
+                text="点「立即认证」让本机上线。", fg=TEXT3)
+            return
+
+        for d in devices:
+            dip = str(d.get("ip", "?"))
+            t = d.get("type")
+            kind = {1: "手机 WIFI 使用中", 2: "电脑有线使用中",
+                    3: "电脑 WIFI 使用中"}.get(t, "未知设备")
+            mine = dip == ip
+
+            row = tk.Frame(self._dev_list, bg=CARD, highlightthickness=1,
+                           highlightbackground=BORDER, highlightcolor=BORDER)
+            row.pack(fill="x", pady=(0, 8))
+
+            dot = tk.Canvas(row, width=14, height=14, bg=CARD,
+                            highlightthickness=0, bd=0)
+            dot.pack(side="left", padx=(14, 10), pady=14)
+            dot.create_oval(2, 2, 12, 12, fill=OK_C if mine else WARN_C,
+                            outline="")
+
+            info = tk.Frame(row, bg=CARD)
+            info.pack(side="left", fill="x", expand=True)
+            title = tk.Label(info, text=f"{kind}", bg=CARD, fg=TEXT,
+                             font=(FONT, 10, "bold"), anchor="w")
+            title.pack(anchor="w")
+            sub = tk.Label(
+                info,
+                text=f"IP {dip}" + ("　← 本机" if mine else ""),
+                bg=CARD, fg=TEXT2, font=(FONT, 9), anchor="w")
+            sub.pack(anchor="w")
+
+            if not mine:
+                btn = Pill(row, "下线这台", lambda ip=dip: self._kick_device(ip),
+                           height=28, width=88, style="ghost",
+                           font=(FONT, 9))
+                btn.pack(side="right", padx=(0, 14))
+
+        self._dev_hint.configure(
+            text="· 绿点是本机；黄点是其他设备。\n"
+                 "· 想两台同时用：让电脑连手机热点（同一出口 IP），只认证一次。",
+            fg=TEXT3)
+
+    def _kick_device(self, ip: str):
+        """下线指定设备（把名额还给它）。"""
+        token = self.cfg.get_token()
+        if not token:
+            self.log("没有 Token，无法操作在线设备")
+            return
+        self.log(f"正在下线设备 {ip}…")
+        threading.Thread(
+            target=self._kick_device_bg, args=(ip,), daemon=True).start()
+
+    def _kick_device_bg(self, ip: str):
+        res = self.auth.logout_ip(ip, self.cfg.get_token())
+        if res.ok:
+            self.log(f"已下线 {ip}")
+            self.q.put(("call", self._refresh_devices))
+        else:
+            self.log(f"下线 {ip} 失败：{res.message}")
 
     def _do_logout(self):
         ip = self.cfg.get("last_ip") or self.auth.detect_local_ip()

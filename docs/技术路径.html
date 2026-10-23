@@ -154,7 +154,22 @@ tr:nth-child(even) td{background:rgba(255,255,255,.015)}
 <td>用户信息（需 Token 验证）</td>
 <td>Bearer Token</td>
 </tr>
+<tr>
+<td>7</td>
+<td><code>GET /api/network/online</code></td>
+<td>学校网关</td>
+<td><strong>在线设备列表</strong></td>
+<td>Bearer Token</td>
+</tr>
+<tr>
+<td>8</td>
+<td><code>GET /api/network/onestatus</code></td>
+<td>学校网关</td>
+<td>查询某 IP 是否在线</td>
+<td>Bearer Token</td>
+</tr>
 </tbody></table>
+<blockquote><p>第 7、8 两个接口是从<strong>官方 APP 的 APK</strong> 里逆向出来的（见下文「从 APK 逆向」）。</p></blockquote>
 <h3>三条认证路径的关系</h3>
 <pre><code>                  ┌─────────────────────────────────────┐
                   │   服务端唯一认定的身份凭证：          │
@@ -313,6 +328,70 @@ Content-Type: application/json
 <pre><code>GET /api/user      （无 Token）→ {&quot;code&quot;:410,&quot;msg&quot;:&quot;登录状态已失效...&quot;}
 GET /api/user/info （无 Token）→ {&quot;code&quot;:411,&quot;msg&quot;:&quot;接口请求错误&quot;}</code></pre>
 <p>只有精确路径需要 Token。<code>/api/user</code> 这个 410 也顺带验证了 「410 = Token 失效」这个判据可以推广到用户中心。</p>
+<h3>第八步：从官方 APK 逆向（决定性一击）</h3>
+<p>前面的结论都是靠&quot;猜 + 试&quot;。真正把服务端逻辑说清楚的是<strong>官方 APP 本身</strong>。</p>
+<p>这个 APK 是 <strong>uni-app（Vue）打包</strong>的，逻辑是<strong>明文 JavaScript</strong>：</p>
+<pre><code>assets/apps/__UNI__A703B0A/www/
+├── pageCampusNetwork/home.js     92 KB  ← 校园网络页面的全部逻辑
+├── app-service.js               1.7 MB  ← 业务逻辑 + 接口路由表
+└── app-view.js                  2.4 MB  ← 视图层模板</code></pre>
+<h4>提取出的完整接口路由表</h4>
+<pre><code>auth:          { url: &quot;/api/network/auth&quot;,      type: &quot;network&quot;   }  // 用户上网认证
+networkAuth:   { url: &quot;/api/network/auth&quot;,      type: &quot;network&quot;   }  // 用户扫码认证
+online:        { url: &quot;/api/network/online&quot;,    type: &quot;network&quot;   }  // 在线设备列表 ★新
+onestatus:     { url: &quot;/api/network/onestatus&quot;, type: &quot;network&quot;   }  // 查询是否在线 ★新
+networklogout: { url: &quot;/api/network/logout&quot;,    type: &quot;network&quot;   }  // 设备下线</code></pre>
+<p>★ 标记的两个是<strong>此前完全不知道的接口</strong>，正是解决&quot;不挤掉手机&quot;的关键。</p>
+<h4>设备类型 type 的含义</h4>
+<p>从 APP 的视图层模板里还原出 <code>type</code> 字段的语义：</p>
+<table><thead><tr>
+<th>type</th>
+<th>界面文案</th>
+<th>含义</th>
+</tr></thead><tbody>
+<tr>
+<td>1</td>
+<td>手机 WIFI 使用中</td>
+<td>手机通过 Wi-Fi 上网</td>
+</tr>
+<tr>
+<td>2</td>
+<td>电脑有线使用中</td>
+<td>电脑通过网线上网</td>
+</tr>
+<tr>
+<td>3</td>
+<td>电脑 WIFI 使用中</td>
+<td>电脑通过 Wi-Fi 上网</td>
+</tr>
+</tbody></table>
+<h4>单设备限制的真相</h4>
+<p>APP 里 <code>showSiglePopup</code>（Sigle = Single，单设备弹窗）的模板文案：</p>
+<blockquote><p><strong>「该套餐已有设备使用，无法支持多台设备同时上网。」</strong></p><p>按钮：「查看当前设备」</p></blockquote>
+<p>这句话点明了两件事：</p>
+<ol><li><strong>限制来自套餐，不是技术封锁</strong> —— APP 里还有套餐列表/转换订单接口</li></ol>
+<p>（<code>api/order/getMyCombo</code>、<code>api/order/have</code>、<code>api/order/createConvert</code>）， 理论上可以升级到多设备套餐</p>
+<ol><li>「查看当前设备」按钮 → 就是 <code>/api/network/online</code> 接口</li></ol>
+<p>同时 <code>type</code> 字段的出现说明服务端<strong>能区分设备类型</strong>， 但套餐限制依然按&quot;同时只能一台&quot;来判定。</p>
+<h4>错误码语义（APP 里直接给出的）</h4>
+<pre><code>200 == o.code ? 成功
+700 == o.code ? showNotice.open()      // 提示框
+701 == o.code ? showSiglePopup.open()  // 单设备弹窗 ← &quot;多台设备同时上网&quot;</code></pre>
+<p>其中 <code>notice701</code> 会被存到本地存储，下次打开 APP 时弹一次—— 说明 701 是服务端明确返回的&quot;设备数超限&quot;信号。</p>
+<h4>实测服务端行为（关键）</h4>
+<p>拿真实 Token 逐个验证：</p>
+<pre><code>GET /api/network/online
+→ {&quot;code&quot;:200,&quot;msg&quot;:&quot;&quot;,&quot;data&quot;:[{&quot;ip&quot;:&quot;10.135.130.202&quot;,&quot;type&quot;:2}]}
+
+GET /api/network/onestatus?ip=10.135.130.202
+→ {&quot;code&quot;:200,&quot;msg&quot;:&quot;当前设备在线&quot;}
+
+GET /api/network/auth?ip=&lt;另一个IP&gt;     （已有设备在线时）
+→ {&quot;code&quot;:409,&quot;msg&quot;:&quot;当前套餐只支持单设备认证，请检查在线设备&quot;}</code></pre>
+<p><strong>三个关键结论：</strong></p>
+<ol><li><strong>服务端按出口 IP 记录在线设备</strong>，与 MAC/设备类型无关地做互斥</li><li><strong>409 表示&quot;已有设备在线&quot;</strong>，且<strong>已在线的 IP 重复认证也返回 409</strong>（幂等拒绝）</li><li><code>onestatus</code> 是<strong>按 IP 段</strong>判断的——<code>10.135.130.x</code> 整段都返回&quot;在线&quot;，</li></ol>
+<p>而 <code>1.2.3.4</code> 返回&quot;不在线&quot;。说明认证网关接管了整个网段</p>
+<p>第 3 点很重要：它意味着<strong>只要两台设备共用同一个出口 IP， 服务端就只看到&quot;一台设备&quot;</strong>，从而不触发 409。</p>
 <hr>
 <h2 id="核心机制">核心机制</h2>
 <h3>1. 免扫码认证：为什么 <code>auth?ip=</code> 能跳过整环</h3>
@@ -353,7 +432,85 @@ for host, port in [(&quot;223.5.5.5&quot;, 53), (&quot;119.29.29.29&quot;, 53),
             return True
     except Exception:
         continue</code></pre>
-<h3>3. 单设备在线名额的互斥处理</h3>
+<h3>3. 怎么做到&quot;不挤掉手机，两台同时用&quot;</h3>
+<p>这是用户实际最关心的需求。分析清楚后有<strong>两个层面的解法</strong>。</p>
+<h4>先看服务端到底怎么判定的</h4>
+<p>实测数据：</p>
+<table><thead><tr>
+<th>场景</th>
+<th>服务端响应</th>
+</tr></thead><tbody>
+<tr>
+<td>无设备在线，认证 A</td>
+<td><code>200 认证成功。</code></td>
+</tr>
+<tr>
+<td>A 已在线，认证 B</td>
+<td><code>409 当前套餐只支持单设备认证，请检查在线设备</code></td>
+</tr>
+<tr>
+<td>A 已在线，<strong>再次认证 A</strong></td>
+<td><code>409</code>（同一条也拒绝，幂等）</td>
+</tr>
+<tr>
+<td>下线 A 后认证 A</td>
+<td><code>200 认证成功。</code></td>
+</tr>
+</tbody></table>
+<p>即：<strong>服务端只认&quot;当前有哪几个 IP 在线&quot;，不区分是谁先来的</strong>。 认证新 IP 会顶掉旧的（旧设备掉线），这是服务端行为，客户端无法绕开。</p>
+<h4>解法一：共享出口 IP（推荐，无需任何特权）</h4>
+<p>关键观察：<code>onestatus</code> 是<strong>按 IP 段</strong>判断在线的 （<code>10.135.130.x</code> 整段返回&quot;在线&quot;，<code>1.2.3.4</code> 返回&quot;不在线&quot;）， 说明<strong>认证网关接管整个网段，服务端视角里&quot;IP&quot;就是唯一标识</strong>。</p>
+<p>于是：</p>
+<pre><code>手机连校园网 Wi-Fi  →  手机开热点  →  电脑连手机热点
+                                          ↓
+                        两台设备对外是同一个出口 IP
+                                          ↓
+                        服务端只看到&quot;一台设备&quot;（type=1 手机 WIFI）
+                                          ↓
+                              只需认证一次，两台同时可用</code></pre>
+<p><strong>程序如何配合</strong>：认证前先查 <code>/api/network/online</code>， 如果本机出口 IP 已经在列表里 → <strong>直接判定为&quot;已在线&quot;并跳过认证</strong>。 绝不能执行 <code>logout</code>，否则会把共享中的连接断开、把手机踢下线。</p>
+<p>这就是代码里的<strong>共享模式</strong>：</p>
+<pre><code># 0) 共享模式：本机出口 IP 已在服务端在线列表中 → 已经在线
+devices = self.online_devices(token)
+for d in devices:
+    if str(d.get(&quot;ip&quot;, &quot;&quot;)) == ip:
+        return AuthResult(ok=True, status=OK,
+                          message=&quot;本机出口 IP 已在服务端在线列表中&quot;,
+                          stage=&quot;共享模式：检测到本机已在线&quot;)</code></pre>
+<h4>解法二：程序层面不再主动顶替</h4>
+<p>原来的行为是「认证失败 → 自动 logout 手机的 IP → 再认证」， 这<strong>必然</strong>会把手机挤下线。现在：</p>
+<ul><li><code>auto_kick_phone</code> <strong>默认关闭</strong></li><li>认证失败时明确告诉你「被谁占着」，并给出两条可选路径</li><li>提供<strong>「在线设备」窗口</strong>：看得见谁在线（绿点=本机，黄点=其他设备），</li></ul>
+<p>并能一键下线某台设备——把「谁让谁」的决定权交回给你</p>
+<h4>解法三：升级到多设备套餐（如果学校提供）</h4>
+<p>APP 里有套餐相关接口：</p>
+<pre><code>GET  /api/order/getMyCombo      我的套餐列表
+GET  /api/order/have             可转换套餐列表
+POST /api/order/createConvert    生成转换订单</code></pre>
+<p>单设备弹窗的文案是「<strong>该套餐</strong>已有设备使用」—— 既然按套餐限制，理论上升级套餐就能多设备。 （这些接口在云高用户中心的 <code>v3</code> 域名下，需要在校园网内访问。）</p>
+<h4>三种解法的取舍</h4>
+<table><thead><tr>
+<th>方案</th>
+<th>前提</th>
+<th>体验</th>
+</tr></thead><tbody>
+<tr>
+<td>共享出口 IP</td>
+<td>电脑连手机热点</td>
+<td><strong>最好</strong>，两台同时在线，无冲突</td>
+</tr>
+<tr>
+<td>不自动顶替</td>
+<td>手动点「在线设备」切换</td>
+<td>明确可控，不会莫名其妙掉线</td>
+</tr>
+<tr>
+<td>升级套餐</td>
+<td>学校提供多设备套餐</td>
+<td>一次性解决，但可能要花钱</td>
+</tr>
+</tbody></table>
+<hr>
+<h3>4. 单设备在线名额的互斥处理</h3>
 <p>云高账号同时只能有 1 台设备在线，这是<strong>服务端硬限制</strong>，无法绕开。 只能设计与之配合的行为：</p>
 <pre><code>auth?ip=&lt;PC_IP&gt;                        直接认证
   ↓ 失败
@@ -364,7 +521,7 @@ logout?ip=&lt;手机IP&gt; → auth?ip=          自动顶替手机
 明确报错：区分「Token 已失效」与「账号被其他设备占用」</code></pre>
 <p>配套设计：</p>
 <ul><li><strong>「归还名额」按钮</strong> —— 一键 <code>logout?ip=&lt;PC_IP&gt;</code>，把位置让回手机</li><li><strong>只做 PC 独占</strong> —— 不实现热点/ICS/路由器共享</li></ul>
-<h3>4. MAC 随机化适配</h3>
+<h3>5. MAC 随机化适配</h3>
 <p>单名额下 MAC 一变就被当成新设备，更容易撞限制。 本项目的做法是<strong>完全不去管它</strong>：</p>
 <ul><li>每次运行重新探测出口 IP 与 MAC（UDP connect 选路由 + 解析 ipconfig 按 IP 配对）</li><li>出口 IP 变化时（守护线程检测到）立即重新认证</li><li>文档中提示用户可自行关闭 Windows 的「随机硬件地址」，但不强制</li></ul>
 <hr>

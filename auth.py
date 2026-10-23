@@ -257,6 +257,9 @@ class CampusAuth:
                 # 云高用 410 统一表示"登录状态已失效"（Token 过期/未认证）
                 if code in (410, "410"):
                     return TOKEN_INVALID, msg or "登录状态已失效"
+                # 409 = 套餐只允许单设备，且已有设备在线（实测）
+                if code in (409, "409"):
+                    return DEVICE_LIMIT, msg or "套餐只支持单设备认证，已有设备在线"
                 low_msg = msg.lower()
                 if any(w in msg for w in _TOKEN_BAD_WORDS) or any(
                     w in low_msg for w in _TOKEN_BAD_WORDS
@@ -419,8 +422,33 @@ class CampusAuth:
         phone_ip: str = "",
         kick_phone: bool = True,
     ) -> AuthResult:
-        """四级认证链：直连 -> 清本机陈旧会话 -> 顶替手机 -> 明确报错。"""
+        """四级认证链：直连 -> 清本机陈旧会话 -> 顶替手机 -> 明确报错。
+
+        **共享模式**（单设备套餐下不挤掉手机）：
+        云高按**出口 IP** 记录在线设备。若本机出口 IP 已经出现在服务端
+        在线列表里，说明这台设备（可能是经手机热点共享同一出口）**已经在线**，
+        此时直接判定成功，绝不执行 logout —— 这样就不会把手机踢下线。
+        """
         attempts: List[str] = []
+
+        # 0) 共享模式：本机出口 IP 已在服务端在线列表中 → 已经在线
+        try:
+            devices = self.online_devices(token)
+        except Exception:
+            devices = []
+        for d in devices:
+            if str(d.get("ip", "")) == ip:
+                kind = {1: "手机 WIFI", 2: "电脑有线", 3: "电脑 WIFI"}.get(
+                    d.get("type"), "设备"
+                )
+                return AuthResult(
+                    ok=True,
+                    status=OK,
+                    message=f"本机出口 IP 已在服务端在线列表中（{kind}），无需重复认证",
+                    detail=str(d),
+                    stage="共享模式：检测到本机已在线",
+                    http_code=200,
+                )
 
         # 1) 直连
         res = self.auth_by_ip(ip, token)
@@ -451,7 +479,18 @@ class CampusAuth:
         if res.status == TOKEN_INVALID:
             res.message = "Token 已失效（可能因在 APP 内退出账号或发生设备登录）→ 请重新抓取 Token"
         elif res.status == DEVICE_LIMIT:
-            res.message = "账号在线名额被其他设备占用 → 已在设置里填入手机 IP 以便自动顶替"
+            others = [str(d.get("ip", "")) for d in devices
+                      if str(d.get("ip", "")) != ip]
+            if others:
+                res.message = (
+                    f"套餐只支持单设备，账号当前被 {', '.join(others)} 占用。\n"
+                    "· 想两台同时用：让电脑连手机热点（同一出口 IP），只认证一次\n"
+                    "· 想独占：填上手机 IP 开启自动顶替，或点「归还名额」手动切换"
+                )
+            else:
+                res.message = (
+                    "账号在线名额被其他设备占用 → 已在设置里填入手机 IP 以便自动顶替"
+                )
         elif res.status == NOT_AUTH:
             res.message = "认证接口不可达或被门户拦截 → 请确认已连接校园网"
         else:
@@ -471,6 +510,58 @@ class CampusAuth:
             stage="token 健康检查",
             http_code=code,
         )
+
+    # ------------------------------------------------------------ 在线设备
+
+    def online_devices(self, token: str) -> List[Dict[str, Any]]:
+        """查询账号当前在线的设备列表。
+
+        云高 APP 里「查看当前设备」用的就是这个接口。
+        返回形如 ``[{"ip": "10.135.130.202", "type": 2}]``。
+
+        type 含义（逆向自 APP 模板文案）：
+            1 = 手机 WIFI 使用中
+            2 = 电脑有线使用中
+            3 = 电脑 WIFI 使用中
+        """
+        url = self._url("/api/network/online", {})
+        code, body, headers = self._get(url, token)
+        if code is None:
+            return []
+        try:
+            payload = json.loads(body or "{}")
+        except Exception:
+            return []
+        data = payload.get("data") if isinstance(payload, dict) else None
+        if not isinstance(data, list):
+            return []
+        return [d for d in data if isinstance(d, dict)]
+
+    def one_status(self, ip: str, token: str) -> bool:
+        """查询某个 IP 当前是否已在线。"""
+        url = self._url("/api/network/onestatus", {"ip": ip})
+        code, body, headers = self._get(url, token)
+        if code is None:
+            return False
+        try:
+            payload = json.loads(body or "{}")
+        except Exception:
+            return False
+        return isinstance(payload, dict) and payload.get("code") in (200, "200")
+
+    def describe_devices(self, token: str, my_ip: str = "") -> str:
+        """把在线设备列表格式化成一行人话，用于状态卡显示。"""
+        devices = self.online_devices(token)
+        if not devices:
+            return "当前无在线设备"
+        parts: List[str] = []
+        for d in devices:
+            ip = str(d.get("ip", "?"))
+            t = d.get("type")
+            kind = {1: "手机 WIFI", 2: "电脑有线", 3: "电脑 WIFI"}.get(t, "未知设备")
+            tag = "（本机）" if ip == my_ip else ""
+            parts.append(f"{kind} {ip}{tag}")
+        return " | ".join(parts)
 
     # ------------------------------------------------------------ 自愈认证
 
