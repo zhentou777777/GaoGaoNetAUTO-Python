@@ -151,6 +151,51 @@ class CampusAuth:
             pass
         return ""
 
+    def detect_gateway(self) -> str:
+        """探测本机默认网关（走哪条链路出去）。
+
+        用途：判断当前是「直连校园网」还是「经手机热点 NAT」——
+        后者本机 IP 是 192.168.x.x，而云高只认出口 IP。
+        """
+        try:
+            raw = subprocess.run(
+                ["ipconfig", "/all"], capture_output=True, timeout=8
+            ).stdout
+        except Exception:
+            return ""
+        out = raw.decode("gbk", "ignore")
+        m = re.search(
+            r"Default Gateway[^0-9]*([0-9]{1,3}(?:\.[0-9]{1,3}){3})", out)
+        if m:
+            return m.group(1)
+        m = re.search(
+            r"默认网关[^0-9]*([0-9]{1,3}(?:\.[0-9]{1,3}){3})", out)
+        return m.group(1) if m else ""
+
+    def is_nat_mode(self) -> bool:
+        """判断本机是否处于 NAT 之后（典型场景：连手机热点）。
+
+        判据：默认网关是私有地址（192.168.x / 10.x / 172.16-31.x），
+        且网关与本机 IP 不在同一网段。
+        此时本机 IP 不是云高认的出口 IP，认证必须用出口 IP。
+        """
+        gw = self.detect_gateway()
+        ip = self.detect_local_ip()
+        if not gw or not ip:
+            return False
+        # 网关是私有地址 → 典型的家用/热点路由器
+        if not (gw.startswith("192.168.") or gw.startswith("10.")
+                or (gw.startswith("172."))):
+            return False
+        # 网关与本机不同段 → 经过了路由/NAT
+        try:
+            g = tuple(int(x) for x in gw.split("."))
+            i = tuple(int(x) for x in ip.split("."))
+            same = g[0] == i[0] and g[1] == i[1]
+            return not same
+        except Exception:
+            return False
+
     def detect_mac(self) -> str:
         """取当前活动网卡的真实 MAC（Windows 下按 IP 精确匹配）。"""
         ip = self.detect_local_ip()
@@ -421,6 +466,7 @@ class CampusAuth:
         token: str,
         phone_ip: str = "",
         kick_phone: bool = True,
+        takeover: bool = False,
     ) -> AuthResult:
         """四级认证链：直连 -> 清本机陈旧会话 -> 顶替手机 -> 明确报错。
 
@@ -464,7 +510,22 @@ class CampusAuth:
             return res
         attempts.append(f"清理本机会话后仍失败：{res.message}")
 
-        # 3) 顶替手机
+        # 3) 自动抢占：踢掉占用名额的设备
+        # 只在 takeover=True 时启用（用户主动点了「立即认证」/「抢占上线」）。
+        # 自动重连场景不抢占，否则会和手机互相踢，形成"抢登录"死循环。
+        if takeover:
+            for d in devices:
+                other = str(d.get("ip", ""))
+                if other and other != ip:
+                    self.log(f"抢占：下线占用设备 {other}")
+                    self.logout_ip(other, token)
+            res = self.auth_by_ip(ip, token)
+            if res.ok:
+                res.stage = "名额被占→自动抢占→认证成功"
+                return res
+            attempts.append(f"抢占后仍失败：{res.message}")
+
+        # 4) 顶替指定手机 IP
         if kick_phone and phone_ip:
             self.logout_ip(phone_ip, token)
             res = self.auth_by_ip(ip, token)
@@ -473,7 +534,7 @@ class CampusAuth:
                 return res
             attempts.append(f"顶替手机后仍失败：{res.message}")
 
-        # 4) 明确归因
+        # 5) 明确归因
         res.attempts = attempts
         res.stage = " / ".join(attempts)
         if res.status == TOKEN_INVALID:
@@ -484,8 +545,9 @@ class CampusAuth:
             if others:
                 res.message = (
                     f"套餐只支持单设备，账号当前被 {', '.join(others)} 占用。\n"
-                    "· 想两台同时用：让电脑连手机热点（同一出口 IP），只认证一次\n"
-                    "· 想独占：填上手机 IP 开启自动顶替，或点「归还名额」手动切换"
+                    "【想两台同时用】让电脑连手机热点（同一出口 IP），"
+                    "手机认证后电脑直接能上网，无需再认证\n"
+                    "【想让电脑独占】点「抢占上线」，本机会主动下线对方并接管"
                 )
             else:
                 res.message = (
@@ -572,6 +634,7 @@ class CampusAuth:
         phone_ip: str = "",
         kick_phone: bool = True,
         account: Tuple[str, str] = ("", ""),
+        takeover: bool = False,
     ) -> AuthResult:
         """四级认证链 + 账号密码兜底换 Token。
 
@@ -583,7 +646,7 @@ class CampusAuth:
             1) 四级认证链（直连 → 清理本机会话 → 顶替手机）
             2) 若失败且判定为 Token 失效 → 用账号密码换新 Token → 重跑认证链
         """
-        res = self.login_chain(ip, token, phone_ip, kick_phone)
+        res = self.login_chain(ip, token, phone_ip, kick_phone, takeover=takeover)
 
         if res.ok:
             return res
@@ -619,7 +682,8 @@ class CampusAuth:
             return res
 
         self.log("★ 已用账号密码换取新 Token，重新认证…")
-        res2 = self.login_chain(ip, lr.token, phone_ip, kick_phone)
+        res2 = self.login_chain(ip, lr.token, phone_ip, kick_phone,
+                                takeover=takeover)
         if res2.ok:
             res2.stage = "Token 失效→自动换新 Token→认证成功"
             res2.new_token = lr.token

@@ -13,6 +13,7 @@ import json
 import os
 import platform
 import sys
+import time
 from pathlib import Path
 from typing import Any, Dict
 
@@ -162,6 +163,31 @@ class Config:
             self.path.write_text(
                 json.dumps(self.data, ensure_ascii=False, indent=2), encoding="utf-8"
             )
+            self._backup()
+        except Exception:
+            pass
+
+    def _backup(self) -> None:
+        """写一份备份，防止误删 exe 时连配置一起丢。
+
+        保留最近 3 份，文件名带时间戳。
+        """
+        try:
+            bak_dir = self.path.parent / "config_backup"
+            bak_dir.mkdir(parents=True, exist_ok=True)
+            stamp = time.strftime("%Y%m%d-%H%M%S")
+            bak = bak_dir / f"config-{stamp}.json"
+            bak.write_text(
+                json.dumps(self.data, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+            # 只保留最近 3 份
+            olds = sorted(bak_dir.glob("config-*.json"))
+            for old in olds[:-3]:
+                try:
+                    old.unlink()
+                except Exception:
+                    pass
         except Exception:
             pass
 

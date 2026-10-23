@@ -418,20 +418,52 @@ class App:
         self.lbl_heal.pack(fill="x")
 
     def _build_actions(self, parent):
+        """操作按钮区：用 grid 自适应换行，避免窗口变窄时按钮重叠。"""
         bar = tk.Frame(parent, bg=BG)
         bar.pack(fill="x", pady=(14, 0))
 
-        self.btn_login = Pill(bar, "立即认证", self._do_login, accent=True,
-                              height=42, width=140, icon="⚡")
-        self.btn_login.pack(side="left")
-        Pill(bar, "扫码登录", self._open_qr, height=42, width=126,
-             style="ghost", icon="▣").pack(side="left", padx=(10, 0))
-        Pill(bar, "归还名额", self._do_logout, height=42, width=126,
-             style="ghost", icon="↩").pack(side="left", padx=(10, 0))
-        Pill(bar, "检查 Token", self._do_check_token, height=42, width=134,
-             style="ghost", icon="✓").pack(side="left", padx=(10, 0))
-        Pill(bar, "在线设备", self._do_show_devices, height=42, width=126,
-             style="ghost", icon="▤").pack(side="left", padx=(10, 0))
+        # (文案, 回调, 样式, 图标, 优先占两列)
+        items = [
+            ("立即认证", lambda: self._do_login(takeover=True), "accent", "⚡", True),
+            ("扫码登录", self._open_qr, "ghost", "▣", False),
+            ("抢占上线", self._do_takeover, "ghost", "⇄", False),  # 独立实现
+            ("在线设备", self._do_show_devices, "ghost", "▤", False),
+            ("归还名额", self._do_logout, "ghost", "↩", False),
+            ("检查 Token", self._do_check_token, "ghost", "✓", False),
+        ]
+        self._action_buttons = []
+        for text, cmd, style, icon, wide in items:
+            b = Pill(bar, text, cmd, height=42, width=150,
+                     style=style, icon=icon)
+            self._action_buttons.append((b, wide))
+            b.grid(row=0, column=0, sticky="ew", padx=(0, 8), pady=(0, 8))
+
+        # 网格列按窗口宽度自适应：能放 3 个就放 3 个，放不下自动换行。
+        # 用「游标」推进列号，正确处理跨列按钮。
+        def _relayout(event=None):
+            width = bar.winfo_width() or 600
+            per_row = 3 if width >= 540 else (2 if width >= 360 else 1)
+            n = len(self._action_buttons)
+            # 尽量让每行都排满，避免最后一行空一大半
+            rows = (n + per_row - 1) // per_row
+            # 若最后一行只剩 1 个，就从上一行借一个下来
+            if rows > 1 and (n % per_row) == 1:
+                rows -= 1
+                per_row = (n + rows - 1) // rows
+            col = 0
+            row = 0
+            for b, _ in self._action_buttons:
+                if col >= per_row:
+                    col = 0
+                    row += 1
+                b.grid_configure(row=row, column=col, columnspan=1,
+                                 sticky="ew", padx=(0, 8), pady=(0, 8))
+                col += 1
+            for c in range(3):
+                bar.grid_columnconfigure(c, weight=1, uniform="act")
+
+        bar.bind("<Configure>", _relayout)
+        _relayout()
 
     def _build_log(self, parent):
         wrap = tk.Frame(parent, bg=BG)
@@ -639,6 +671,17 @@ class App:
         )
         self._update_heal_bar()
 
+    def _other_devices(self, my_ip: str = "") -> list:
+        """列出占用名额的其他设备 IP。"""
+        if not my_ip:
+            my_ip = self.auth.detect_local_ip()
+        try:
+            devs = self.auth.online_devices(self.cfg.get_token())
+        except Exception:
+            return []
+        return [str(d.get("ip", "")) for d in devs
+                if str(d.get("ip", "")) != my_ip]
+
     def _devices_brief(self) -> str:
         """在线设备一行摘要——单设备套餐下这一行最关键。"""
         try:
@@ -821,21 +864,50 @@ class App:
 
     # ------------------------------------------------------------ 认证动作
 
-    def _do_login(self):
+    def _do_login(self, takeover: bool = False):
         self.btn_login.set_enabled(False)
         self.set_status("working", "正在认证…", WARN_C)
-        threading.Thread(target=self._login_bg, daemon=True).start()
+        threading.Thread(target=self._login_bg, args=(takeover,),
+                         daemon=True).start()
 
     def _reenable(self):
         self.btn_login.set_enabled(True)
 
-    def _login_bg(self):
+    def _login_bg(self, takeover: bool = False):
+        """takeover=True 表示用户主动要求"电脑接管"（可踢掉占用设备）。
+
+        自动重连场景传 False —— 否则会和手机互相踢，形成抢登录死循环。
+        """
         ip = self.auth.detect_local_ip()
         if not ip:
             self.log("未探测到本机出口 IP，请确认已连接校园网")
             self.q.put(("status", ("error", "未连接校园网", ERR_C, "")))
             self.q.put(("call", self._reenable))
             return
+
+        # ── 共享模式（手机热点）────────────────────────────────────
+        # 本机走手机热点时，出口 IP 是手机的 IP，手机认证后整个局域网
+        # 都已被 NAT 放行 —— PC **不需要**再单独认证一次，
+        # 而且再认证反而会因为「套餐只支持单设备」把手机挤掉。
+        if self.auth.is_nat_mode():
+            from netguard import probe_online
+
+            if probe_online():
+                self.log("检测到本机走手机热点且外网已连通 —— "
+                         "手机已认证并为本机放行，无需重复认证")
+                self.cfg.set("last_ip", ip)
+                self.cfg.set("last_auth_ok", True)
+                self.q.put(("status", ("online", "共享在线（经手机热点）", OK_C,
+                                       f"出口 {ip}")))
+                self.q.put(("info", None))
+                self.q.put(("call", self._reenable))
+                return
+            self.log("检测到本机走手机热点，但外网尚未连通 —— "
+                     "请先在手机上完成认证")
+
+        # ── 直连校园网：按服务端在线列表决定要不要动别人 ──────────
+        # 若在线列表里已有别的设备（通常是手机），且本机不在其中，
+        # 说明名额被占。此时**默认不动手机**，把选择权交给用户。
         token = self.cfg.get_token()
         if not token:
             # 没有 Token：若配了账号密码，先自动换一个；否则才降级到扫码
@@ -864,8 +936,9 @@ class App:
         self.log(f"开始认证，IP={ip}")
         res = self.auth.login_chain_self_heal(
             ip, token, str(self.cfg.get("phone_ip") or ""),
-            bool(self.cfg.get("auto_kick_phone", True)),
+            bool(self.cfg.get("auto_kick_phone", False)),
             self.cfg.get_account(),
+            takeover=takeover,
         )
 
         # L1 自动续存：服务端下发了新 Token 就立刻换掉
@@ -903,13 +976,94 @@ class App:
             if res.status == TOKEN_INVALID:
                 self.q.put(("status", ("error", "Token 已失效", ERR_C, "建议扫码登录")))
             elif res.status == DEVICE_LIMIT:
-                self.q.put(("status", ("error", "名额被占用", ERR_C, "可填手机 IP 自动顶替")))
+                others = self._other_devices(ip)
+                who = f"被 {others[0]} 占用" if others else "名额被占用"
+                self.q.put(("status", ("error", who, ERR_C, "点「抢占上线」接管")))
             elif res.status == NOT_AUTH:
                 self.q.put(("status", ("error", "认证接口不可达", ERR_C, "请确认已连校园网")))
             else:
                 self.q.put(("status", ("error", "认证失败", ERR_C, "")))
         self.q.put(("info", None))
         self.q.put(("call", self._reenable))
+
+    def _do_takeover(self):
+        """抢占上线：踢掉占用名额的设备，然后让本机上线。
+
+        单设备套餐下服务端只允许一个 IP 在线。本机被别的设备（通常是手机）
+        挡住时，这条路径能主动把对方下线再接管——用户明确要求的能力。
+        """
+        token = self.cfg.get_token()
+        if not token:
+            self.log("没有 Token，无法抢占——请先扫码登录或填账号密码")
+            self.q.put(("status", ("error", "缺少 Token", ERR_C, "请先扫码登录")))
+            return
+        self.log("正在抢占上线…")
+        threading.Thread(target=self._takeover_bg, daemon=True).start()
+
+    def _takeover_bg(self):
+        """抢占上线：把占用名额的设备踢掉，让本机接管。
+
+        复用认证链的 takeover 分支，行为与「立即认证」一致，
+        但额外做 Token 自愈 —— 抢占时 Token 常已过期。
+        """
+        token = self.cfg.get_token()
+        ip = self.auth.detect_local_ip()
+
+        # Token 可能已失效（服务端轮换）——先自愈换一个，否则查不到设备
+        devices = self.auth.online_devices(token)
+        if not devices:
+            mobile, pwd = self.cfg.get_account()
+            if mobile and pwd:
+                try:
+                    from acclogin import AccountLogin, mask_mobile
+
+                    self.log(f"Token 已失效，用账号 {mask_mobile(mobile)} 重新换取…")
+                    lr = AccountLogin().login(mobile, pwd)
+                    if lr.ok and lr.token:
+                        self.cfg.set_token(lr.token)
+                        token = lr.token
+                        self.log("★ 已换取新 Token，继续抢占")
+                except Exception as exc:
+                    self.log(f"换取 Token 失败: {exc}")
+
+        try:
+            devices = self.auth.online_devices(token)
+        except Exception as exc:
+            self.log(f"查询在线设备失败: {exc}")
+            self.q.put(("status", ("error", "查询失败", ERR_C, "")))
+            return
+
+        if not devices:
+            if not token:
+                self.log("没有 Token，无法查询在线设备——请先扫码登录")
+                self.q.put(("status", ("error", "缺少 Token", ERR_C, "请先扫码登录")))
+                return
+            self.log("当前没有其他设备在线，直接认证")
+            self._do_login(takeover=True)
+            return
+
+        others = [str(d.get("ip", "")) for d in devices
+                  if str(d.get("ip", "")) != ip]
+        for other in others:
+            self.log(f"占用名额的设备：{other}")
+        self.log("正在抢占上线…")
+
+        # 走认证链的 takeover 分支：自动下线占用设备后接管
+        res = self.auth.login_chain_self_heal(
+            ip, token, str(self.cfg.get("phone_ip") or ""),
+            bool(self.cfg.get("auto_kick_phone", False)),
+            self.cfg.get_account(),
+            takeover=True,
+        )
+        if res.ok:
+            self.cfg.set("last_ip", ip)
+            self.cfg.set("last_auth_ok", True)
+            self.log(f"★ 抢占成功，本机已上线（IP {ip}）")
+            self.q.put(("status", ("online", "已抢占上线", OK_C, f"IP {ip}")))
+        else:
+            self.log(f"抢占失败：{res.message}")
+            self.q.put(("status", ("error", "抢占失败", ERR_C, "")))
+        self.q.put(("info", None))
 
     def _do_show_devices(self):
         """打开「在线设备」窗口：查看谁在占用名额，一键下线。"""
@@ -1156,15 +1310,16 @@ class App:
     def _handle_guard_event(self, ev):
         if ev.kind == "offline":
             self.set_status("error", "网络中断", ERR_C, "准备重连")
-            self._do_login()
+            # 自动重连**不抢占**——否则会和手机互相踢，形成抢登录死循环
+            self._do_login(takeover=False)
             # 启动持续重连循环，直到网络真的恢复
             self.guard.start_reconnect()
         elif ev.kind == "reconnect":
             self.log(ev.detail or "重连尝试")
-            self._do_login()
+            self._do_login(takeover=False)
         elif ev.kind == "ip_changed":
             self.log(f"出口 IP 变化，重新认证以免掉线：{ev.ip}")
-            self._do_login()
+            self._do_login(takeover=False)
         elif ev.kind == "online":
             self.guard.stop_reconnect()
             self.q.put(("info", None))
