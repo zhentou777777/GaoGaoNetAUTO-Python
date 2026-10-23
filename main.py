@@ -214,14 +214,44 @@ class App:
 
         left = tk.Frame(body, bg=BG)
         left.pack(side="left", fill="both", expand=True)
+
+        # 右侧设置面板做成可滚动 —— 内容变多（如新增账号密码区）也不会被裁掉
         right = tk.Frame(body, bg=BG, width=330)
         right.pack(side="right", fill="y", padx=(14, 0))
         right.pack_propagate(False)
 
+        canvas = tk.Canvas(right, bg=BG, highlightthickness=0, bd=0,
+                           width=330)
+        canvas.pack(side="left", fill="both", expand=True)
+        scrollbar = tk.Scrollbar(right, orient="vertical", command=canvas.yview,
+                                  width=8, troughcolor=BG, bg=BORDER,
+                                  activebackground=ACCENT, bd=0,
+                                  highlightthickness=0)
+        scrollbar.pack(side="right", fill="y")
+        canvas.configure(yscrollcommand=scrollbar.set)
+
+        inner_wrap = tk.Frame(canvas, bg=BG)
+        self._settings_win = canvas.create_window((0, 0), window=inner_wrap,
+                                                   anchor="nw")
+
+        def _on_settings_configure(_evt=None):
+            canvas.configure(scrollregion=canvas.bbox("all"))
+
+        def _on_mousewheel(event):
+            canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+
+        inner_wrap.bind("<Configure>", _on_settings_configure)
+        canvas.bind("<Configure>", lambda e: canvas.itemconfigure(
+            self._settings_win, width=e.width))
+        for w in (canvas, inner_wrap):
+            w.bind("<MouseWheel>", _on_mousewheel)
+            w.bind("<Button-4>", lambda e: canvas.yview_scroll(1, "units"))
+            w.bind("<Button-5>", lambda e: canvas.yview_scroll(-1, "units"))
+
         self._build_status(left)
         self._build_actions(left)
         self._build_log(left)
-        self._build_settings(right)
+        self._build_settings(inner_wrap)
 
     def _build_status(self, parent):
         card = tk.Frame(parent, bg=CARD, highlightthickness=1,
@@ -436,9 +466,25 @@ class App:
                 f"认证网关   {self.cfg.base_url}\n"
                 f"本机出口   {ip or '未探测到（可能未连校园网）'}      MAC  {mac or '未探测到'}\n"
                 f"占用名额   {self.cfg.get('last_ip') or ip or '未知'}      "
-                f"Token  {self._token_brief()}"
+                f"Token  {self._token_brief()}\n"
+                f"自动重连   {self._selfheal_brief()}"
             )
         )
+
+    def _selfheal_brief(self) -> str:
+        """一句话说明自愈能力状态——用户最关心的就是「断了会不会自己接上」。"""
+        has_acct = self.cfg.has_account()
+        has_tok = self.cfg.has_token()
+        auto = bool(self.cfg.get("autostart"))
+        if has_acct:
+            base = "已就绪（账号密码自动换 Token）"
+        elif has_tok:
+            base = "已就绪（用现有 Token，失效需重抓）"
+        else:
+            base = "未就绪（需填账号密码或扫码）"
+        if auto:
+            base += " · 开机自启已开"
+        return base
 
     def _token_brief(self) -> str:
         t = self.cfg.get_token()
@@ -467,7 +513,23 @@ class App:
         self.cfg.set("auto_kick_phone", bool(self.var_kick.get()))
         self.cfg.set("autostart", bool(self.var_autostart.get()))
         self._apply_autostart(bool(self.var_autostart.get()))
+
+        # 账号密码一并保存（若已填写且与已存的不同，则触发一次登录换取 Token）
+        mobile = self.var_mobile.get().strip()
+        pwd = self.var_pwd.get()
+        if mobile and pwd:
+            old_mobile, old_pwd = self.cfg.get_account()
+            if mobile != old_mobile or pwd != old_pwd:
+                self.log("检测到账号密码有变化，正在登录换取 Token…")
+                self.cfg.set_account(mobile, pwd)
+                threading.Thread(
+                    target=self._account_login_bg, args=(mobile, pwd), daemon=True
+                ).start()
+                return
+
         self.log("设置已保存")
+        if bool(self.var_autostart.get()):
+            self.log("已开启开机自动认证——以后开机和断网都会自动重连")
         self.q.put(("info", None))
 
     def _do_save_token(self):
@@ -909,6 +971,28 @@ class App:
         if self._quitting:
             self._quit()
             return
+        # 防止"填了密码但忘了点保存"——这是最容易踩的坑
+        try:
+            mobile = self.var_mobile.get().strip()
+            pwd = self.var_pwd.get()
+            if mobile and pwd:
+                old_mobile, old_pwd = self.cfg.get_account()
+                if mobile != old_mobile or pwd != old_pwd:
+                    ans = messagebox.askyesno(
+                        "账号密码还没保存",
+                        "你填了账号密码但还没点「登录并保存」。\n\n"
+                        "不保存的话，断网自动重连将无法工作（因为程序换不到新 Token）。\n\n"
+                        "现在保存并登录吗？",
+                        parent=self.root,
+                    )
+                    if ans:
+                        self.cfg.set_account(mobile, pwd)
+                        threading.Thread(
+                            target=self._account_login_bg, args=(mobile, pwd),
+                            daemon=True,
+                        ).start()
+        except Exception:
+            pass
         self.root.withdraw()
         self.log("已隐藏到托盘，右键托盘图标可退出")
 
