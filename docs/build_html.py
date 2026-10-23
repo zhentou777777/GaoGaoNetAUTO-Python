@@ -16,8 +16,13 @@ import sys
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-SRC = HERE / "使用教程.md"
-OUT = HERE / "使用教程.html"
+# 需要生成 HTML 的文档（源文件 → 输出文件）
+DOCS = [
+    ("使用教程.md", "使用教程.html", "糕糕校园网自动认证 · 使用教程",
+     "怎么用：下载、配置、开机自启、断网重连、故障排查"),
+    ("技术路径.md", "技术路径.html", "糕糕校园网自动认证 · 技术路径",
+     "怎么做到的：接口逆向全过程、协议分析、自愈架构、实现取舍"),
+]
 
 CSS = """
 :root{
@@ -160,7 +165,7 @@ def _slug(text: str) -> str:
     return s or "h"
 
 
-def convert(md: str) -> str:
+def convert(md: str, title: str = "文档", subtitle: str = "") -> str:
     lines = md.split("\n")
     out: list[str] = []
     i = 0
@@ -215,7 +220,7 @@ def convert(md: str) -> str:
             txt = m.group(2).strip()
             if level == 1:
                 out.append(f"<h1>{_inline(txt)}</h1>")
-                out.append('<p class="sub">云高（广州云糕科技）统一认证平台 · Windows 桌面工具</p>')
+                out.append(f'<p class="sub">{subtitle}</p>')
             elif level == 2:
                 anchor = _slug(txt)
                 toc.append((txt, anchor))
@@ -287,33 +292,39 @@ def convert(md: str) -> str:
     if idx != -1:
         body = body[:idx] + toc_block + body[idx:]
 
-    return f"""<!DOCTYPE html>
+    return """<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>糕糕校园网自动认证 · 使用教程</title>
-<style>{CSS}</style>
+<title>__TITLE__</title>
+<style>__CSS__</style>
 </head>
 <body>
 <div class="wrap">
 {body}
 </div>
-<script>{_SCRIPT}</script>
+<script>__SCRIPT__</script>
 </body>
 </html>
-"""
+""".replace("__TITLE__", title).replace("__CSS__", CSS) \
+    .replace("__SCRIPT__", _SCRIPT).replace("{body}", body)
 
 
 def main() -> int:
-    if not SRC.exists():
-        print(f"✗ 找不到 {SRC}")
-        return 1
-    md = SRC.read_text(encoding="utf-8")
-    page = convert(md)
-    OUT.write_text(page, encoding="utf-8")
-    print(f"✓ 已生成 {OUT}  ({len(page) / 1024:.1f} KB)")
-    return 0
+    ok = 0
+    for src_name, out_name, title, subtitle in DOCS:
+        src = HERE / src_name
+        out = HERE / out_name
+        if not src.exists():
+            print(f"✗ 找不到 {src}")
+            continue
+        md = src.read_text(encoding="utf-8")
+        page = convert(md, title=title, subtitle=subtitle)
+        out.write_text(page, encoding="utf-8")
+        print(f"✓ 已生成 {out}  ({len(page) / 1024:.1f} KB)")
+        ok += 1
+    return 0 if ok else 1
 
 
 if __name__ == "__main__":
