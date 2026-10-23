@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import base64
 import re
+import time
 from dataclasses import dataclass
 from typing import Optional, Tuple
 
@@ -146,6 +147,11 @@ class QrAssistant:
         # 本机在开始扫码前是否已经在线——用来区分"扫完码上线了"和"本来就在线"
         self._online_before = False
         self._session_uuid = ""
+        # 二维码生成时刻——用于判断是否超过服务端有效期（10 分钟）
+        self._created_at = 0.0
+        # 轮询期间服务端会因重新拉页面而不断下发新的 str cookie，
+        # 这里把原始的会话 UUID 固定下来，避免被覆盖。
+        self._session_cookie = ""
 
     # ------------------------------------------------------------ 拉取
 
@@ -165,6 +171,7 @@ class QrAssistant:
         except Exception:
             cookie_uuid = ""
         self._session_uuid = cookie_uuid or self.state.payload or self.state.code
+        self._session_cookie = cookie_uuid
 
         img = find_qr_image(html)
         if isinstance(img, bytes):
@@ -186,6 +193,7 @@ class QrAssistant:
             self.state.payload = self._session_uuid
 
         self._online_before = probe_online()
+        self._created_at = time.time()
         self.state.status = "waiting"
         self.state.message = "请用糕糕 APP 扫描二维码"
         return self.state
@@ -276,29 +284,20 @@ class QrAssistant:
             self.state.message = "已授权，设备已上线"
             return self.state
 
-        # --- 信号 3：会话是否被轮换（过期）---
+        # --- 信号 3：会话是否被服务端作废（超时）---
+        # 注意：每次请求 /web/network/code 服务端都会下发**新的** str，
+        # 所以不能用"UUID 变了"判断过期——那会永远误判。
+        # 真正的过期判据是"距生成超过服务端给的 10 分钟有效期"。
+        if self._created_at and (time.time() - self._created_at) > SESSION_TTL_MINUTES * 60:
+            self.state.status = "expired"
+            self.state.message = "二维码已过期，请刷新"
+            return self.state
+
         try:
             _code, html = self.auth.fetch_code_page(ip, mac)
         except Exception:
             html = ""
         if html:
-            new_uuid = ""
-            try:
-                new_uuid = self.auth._session.cookies.get("str") or ""
-            except Exception:
-                new_uuid = ""
-            if not new_uuid:
-                new_uuid = decode_xor_payload(html)
-            if (
-                self._session_uuid
-                and new_uuid
-                and new_uuid != self._session_uuid
-                and not self._online_before
-            ):
-                self.state.status = "expired"
-                self.state.message = "二维码已过期，请刷新"
-                return self.state
-
             # 老页面结构兜底：页面里直接写了状态文案
             low = (html or "").lower()
             for kw in _STATUS_OK:

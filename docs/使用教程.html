@@ -172,7 +172,27 @@ tr:nth-child(even) td{background:rgba(255,255,255,.015)}
 <p>云高网页登录流程本身<strong>不带 <code>Authorization</code> 头</strong>，所以从浏览器 DevTools 复制这条路多半取不到。<strong>Token 只存在于糕糕 APP 的网络流量里</strong>。</p>
 <p>好消息是：<strong>Token 只需抓一次</strong>。抓完之后，所有后续认证都由程序自己完成，手机彻底不参与。</p>
 <h3>安卓抓包步骤</h3>
-<ol><li>安卓手机安装 <strong>抓包精灵</strong> 或 <strong>HttpCanary</strong>（任选其一）</li><li>打开抓包工具 → 允许安装 CA 证书</li><li>抓包精灵：设置 → 证书安装 → 选「系统证书」（部分机型还要去系统设置里手动信任）</li><li>HttpCanary：设置 → 证书 → 安装</li><li>开始抓包 → 打开<strong>糕糕 APP</strong>，等几秒让它产生网络请求</li><li>在抓包列表里按域名筛选 <strong>含 <code>auth.yungao</code></strong> 的那条请求</li><li>点开请求 → <strong>请求头 / Request Headers</strong> → 找到 <code>Authorization</code>：</li></ol>
+<ol><li>安卓手机安装 <strong>抓包精灵</strong> 或 <strong>HttpCanary</strong>（任选其一）</li><li>打开抓包工具 → 允许安装 CA 证书</li><li>抓包精灵：设置 → 证书安装 → 选「系统证书」（部分机型还要去系统设置里手动信任）</li><li>HttpCanary：设置 → 证书 → 安装</li><li>开始抓包 → 打开<strong>糕糕 APP</strong>，等几秒让它产生网络请求</li><li>在抓包列表里按域名筛选。云高 APP 会访问这几个域名，<strong>带 <code>Authorization</code> 头的都在里面</strong>：</li></ol>
+<table><thead><tr>
+<th>域名</th>
+<th>说明</th>
+</tr></thead><tbody>
+<tr>
+<td><code>hgs.auth.yungao-tech.com</code></td>
+<td><strong>学校网关</strong>，最优先看这个</td>
+</tr>
+<tr>
+<td><code>user.v4.yungao-tech.com</code></td>
+<td>云高统一用户中心，<code>/api/user</code> 族需要 Token</td>
+</tr>
+<tr>
+<td><code>h5pay.yungao-tech.com</code></td>
+<td>支付相关，一般用不上</td>
+</tr>
+</tbody></table>
+<p>&gt; <strong>抓包工具显示「内容已隐藏」？</strong> &gt; 说明该域名没在解密域名列表里。详情页一般有个「添加此域名」按钮， &gt; 点一下加进去就能看到请求头和响应体了（多数工具有 5 个免费名额，够用）。</p>
+<p>&gt; <strong>最快的入口</strong>：找 <code>hgs.auth.yungao-tech.com/api/network/auth</code> 这条请求—— &gt; 它的请求头就是标准格式的 <code>Authorization: Bearer ...</code>。 &gt; 顺带一提，这条请求的响应体是 <code>{&quot;code&quot;:200,&quot;msg&quot;:&quot;认证成功。&quot;}</code>（36 字节）， &gt; 说明你抓到的 Token 当时是<strong>有效</strong>的。</p>
+<ol><li>点开请求 → <strong>请求头 / Request Headers</strong> → 找到 <code>Authorization</code>：</li></ol>
 <p>``<code> Authorization: Bearer eyJhbGciOi... ^^^^^^^^^^^^^^^^^ 从这里开始复制，到行尾为止 </code>``</p>
 <ol><li>回到电脑主窗口，把这串粘进 <strong>「Bearer Token」</strong> 输入框</li><li>点 <strong>「校验并保存」</strong></li></ol>
 <p>程序会立刻拿这个 Token 去认证验证。验证通过会显示绿色的 Token 健康状态。</p>

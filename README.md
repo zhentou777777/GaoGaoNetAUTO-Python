@@ -176,15 +176,29 @@ python build_exe.py
    解码结果与 `str` cookie **完全一致**（UUID 形式）。
    所以本项目能**纯本地渲染二维码**，不必去扒服务端图片——
    `key` 每个会话随机生成，本地解码器按同一算法还原即可。
-3. 页面里**没有任何状态轮询接口**。手机在 APP 里确认后，
-   服务端直接把「该 session 对应的 IP」置为已上线。
+3. **手机 APP 扫完码后的最后一步是**（手机抓包实测确认）：
+
+   ```
+   GET hgs.auth.yungao-tech.com:1110/api/network/auth?str=<UUID>
+   Authorization: Bearer <APP 自己的 Token>
+   → 200 {"code":200,"msg":"认证成功。"}    (36 字节)
+   ```
+
+   也就是说，手机扫的是 **PC 侧会话的 UUID**，APP 用自己的 Token 替这次会话完成绑定。
+
+   > **重要**：每次请求 `/web/network/code` 服务端都会下发**新的** `str`，
+   > 所以"UUID 变了"不能用来判断二维码过期——真正的判据是 10 分钟有效期。
+   > 本项目已按此实现，避免无限误判过期。
+
+4. 页面里**没有任何状态轮询接口**。手机确认后服务端直接改写
+   「该 session 对应的 IP」的上线状态。
    因此判定"授权是否完成"的正确信号不是某个轮询接口，而是
    **本机是否已经能连通外网**（`netguard.probe_online`）。
 
 这套机制下，扫码路径的完整闭环是：
 
 ```
-PC 拉页面 → 拿 str(UUID) → 本地渲染二维码 → 手机 APP 扫 → 服务端放行本机 IP → PC 检测到已联网 → 完成
+PC 拉页面 → 拿 str(UUID) → 本地渲染二维码 → 手机 APP 扫 → APP 调 auth?str=UUID → 服务端放行本机 IP → PC 检测到已联网 → 完成
 ```
 
 程序还会在轮询时顺带调用 `auth?str=<UUID>` 做一次确认（若有 Token），
@@ -202,7 +216,17 @@ PC 拉页面 → 拿 str(UUID) → 本地渲染二维码 → 手机 APP 扫 → 
    - 抓包精灵：设置 → 证书安装 → 安装到「系统证书」（部分机型需在系统设置里手动信任）；
    - HttpCanary：设置 → 证书 → 安装。
 3. 开始抓包 → 打开 **糕糕 APP**，等几秒让它产生网络请求。
-4. 在抓包列表里按域名筛选 **含 `auth.yungao`** 的那条请求。
+4. 在抓包列表里按域名筛选。云高 APP 会访问这几个域名，**带 `Authorization` 头的都在里面**：
+
+   | 域名 | 说明 |
+   |---|---|
+   | `hgs.auth.yungao-tech.com` | **学校网关**，最优先看这个（程序用的就是它） |
+   | `user.v4.yungao-tech.com` | 云高统一用户中心，`/api/user` 族需要 Token |
+   | `h5pay.yungao-tech.com` | 支付相关，一般用不上 |
+
+   > 若抓包工具显示「内容已隐藏」，把该域名加入**解密域名**列表即可查看。
+   > 想找现成的 Token，优先看 `hgs.auth.yungao-tech.com/api/network/auth` 这条——
+   > 它的请求头就是标准格式的 `Authorization: Bearer ...`。
 5. 点开请求 → **请求头 / Request Headers** → 找到 `Authorization`：
    ```
    Authorization: Bearer eyJhbGciOi...
