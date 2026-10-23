@@ -1,0 +1,8 @@
+requests>=2.31.0
+segno>=1.6.0
+pystray>=0.19.5
+Pillow>=10.0.0
+
+# 抓取模式 capture.py 需要（可选，仅在需要分析网页流程时安装）：
+#   pip install playwright
+#   python -m playwright install chromium
