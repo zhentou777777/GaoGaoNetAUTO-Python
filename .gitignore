@@ -13,3 +13,6 @@ qr_tmp.png
 # 抓取模式产物
 capture.json
 capture.log
+
+# APK 逆向产物
+apk_js/
