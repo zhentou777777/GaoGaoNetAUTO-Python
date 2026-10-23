@@ -123,6 +123,23 @@ python build_exe.py
 # 产物：dist/GaoGaoNetAUTO.exe
 ```
 
+### 方式 D：启用 GitHub Actions 自动构建（可选）
+
+`ci/build_windows.yml` 是预置的 Windows 自动构建工作流（推 tag 自动出 exe）。
+
+> GitHub 要求写入 `.github/workflows/` 的 OAuth token 必须带 `workflow` scope，
+> 所以它默认**不随仓库一起启用**。启用方式（任选其一）：
+>
+> ```bash
+> # 方案 1：交互式补授权（推荐）
+> python ci/install_workflow.py
+>
+> # 方案 2：手动新建带 workflow scope 的 PAT 后替换 remote
+> git remote set-url origin https://<PAT>@github.com/zhentou777777/GaoGaoNetAUTO-Python.git
+> ```
+>
+> 不想折腾 CI 也完全没关系——本机跑 `python build_exe.py` 一样能出 exe。
+
 ---
 
 ## 五、扫码登录是怎么做到"不依赖 Token"的
