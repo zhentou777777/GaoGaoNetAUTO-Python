@@ -27,3 +27,6 @@ pfx-password.txt
 # 编译产物与交付包（二进制不入版本库，改由 GitHub Release 附件分发）
 release/
 dist/
+
+# 工具目录（工作区记忆等，不属于源码）
+.workbuddy/

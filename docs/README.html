@@ -187,7 +187,7 @@ tr:nth-child(even) td{background:rgba(255,255,255,.015)}
 </tr>
 <tr>
 <td><strong>L2</strong></td>
-<td>Token 失效<strong>且没有账号密码</strong>时，程序会<strong>主动弹出二维码窗口</strong>，这条路径完全不依赖 Token</td>
+<td>Token 失效<strong>且没有账号密码</strong>时，程序会<strong>主动弹出二维码弹层</strong>，这条路径完全不依赖 Token</td>
 <td>手机扫一下</td>
 </tr>
 <tr>
@@ -272,7 +272,9 @@ Content-Type: application/json
 </tbody></table>
 <blockquote><p><strong>为什么&quot;扫码登录&quot;撑不过一晚上？</strong></p><p>扫码只是让服务端把<strong>当前这一台设备</strong>放行一次，</p><p>会话是有有效期的，网络断了或会话过期就得重来。</p><p>要真正&quot;开机就连、断网自愈&quot;，必须有<strong>能自己续期的 Token</strong>——</p><p>这就是账号密码登录（L0）存在的意义。</p></blockquote>
 <h3>方式 A：直接用 exe（推荐）</h3>
-<ol><li>从 <a href="https://github.com/zhentou777777/GaoGaoNetAUTO-Python/releases" target="_blank" rel="noopener">Releases</a> 下载 <code>GaoGaoNetAUTO.exe</code>。</li><li>双击运行（绿色的是主窗口，右上角 ✕ 隐藏到托盘，右键托盘图标可退出）。</li><li><strong>先连上校园网</strong>，然后：</li><li>想马上上网 → 点「扫码登录」→ 手机糕糕 APP 扫一下 → 完成；</li><li>想以后完全免手机 → 按下面「获取 Token」取一次 Token，粘贴后点「校验并保存」。</li><li>勾选「开机自动认证」→ 以后开机自动联网。</li></ol>
+<ol><li>从 <a href="https://github.com/zhentou777777/GaoGaoNetAUTO-Python/releases" target="_blank" rel="noopener">Releases</a> 下载 <code>GaoGaoNetAUTO.exe</code>。</li><li>双击运行 —— 程序会<strong>自动打开浏览器</strong>，界面在 <code>127.0.0.1</code> 的本地页面上</li></ol>
+<p>（地址带一次性令牌，只在这台机器上有效）。</p>
+<ul><li>找不到页面？<strong>右键托盘图标</strong> → 「打开界面」</li><li>托盘菜单还可以「立即认证」和「退出」</li><li><strong>先连上校园网</strong>，然后：</li><li>想马上上网 → 点「扫码登录」→ 手机糕糕 APP 扫一下 → 完成；</li><li>想以后完全免手机 → 按下面「获取 Token」取一次 Token，粘贴后点「校验并保存」。</li><li>勾选「开机自动认证」→ 以后开机自动联网。</li></ul>
 <h3>方式 B：从源码运行</h3>
 <pre><code>git clone https://github.com/zhentou777777/GaoGaoNetAUTO-Python.git
 cd GaoGaoNetAUTO-Python
@@ -331,13 +333,14 @@ python build_exe.py
 <p><strong>注意：不要在糕糕 APP 里退出账号</strong>，退出后 Token 会立即失效。</p>
 <hr>
 <h2 id="七-界面说明">七、界面说明</h2>
+<p>界面是<strong>浏览器里的本地网页</strong>（不是传统桌面窗口），跑在 <code>127.0.0.1</code> 的 本地服务上，URL 带一次性令牌。</p>
 <table><thead><tr>
 <th>区域</th>
 <th>说明</th>
 </tr></thead><tbody>
 <tr>
 <td>状态卡</td>
-<td>大圆点显示当前状态（灰=未认证 / 黄=认证中 / 绿=在线 / 红=失败），右侧显示出口 IP</td>
+<td>圆环进度显示当前状态（灰=未认证 / 黄=认证中 / 绿=在线 / 红=失败），中间是出口 IP，下方是网关 / MAC / 名额 / 设备四格信息</td>
 </tr>
 <tr>
 <td>立即认证</td>
@@ -345,7 +348,7 @@ python build_exe.py
 </tr>
 <tr>
 <td>扫码登录</td>
-<td>打开二维码窗口，手机扫一下即可（不依赖 Token）</td>
+<td>弹出二维码弹层，手机扫一下即可（不依赖 Token）</td>
 </tr>
 <tr>
 <td>归还名额</td>
@@ -377,9 +380,10 @@ python build_exe.py
 </tr>
 <tr>
 <td>运行日志</td>
-<td>所有认证尝试、失败原因、降级过程都记录在这里，同时落盘到 <code>logs/app.log</code>（自动脱敏 + 轮转）</td>
+<td>所有认证尝试、失败原因、降级过程都记录在这里（实时推送），同时落盘到 <code>logs/app.log</code>（自动脱敏 + 轮转）</td>
 </tr>
 </tbody></table>
+<blockquote><p>想要传统的桌面窗口？加 <code>--tk</code> 参数启动会切到旧版 Tk 界面</p><p>（功能一样，只是没那么好看）。</p></blockquote>
 <p>配置文件在 <code>%LOCALAPPDATA%\GaoGaoNetAUTO\config.json</code>，<strong>与 exe 放在哪里无关</strong>， 目录权限已收紧到「当前用户 + SYSTEM + Administrators」。 Token 与密码用 <strong>Windows DPAPI</strong> 加密，换机器或换用户都解不开。 可在「设置 · 清除已保存凭据」一键清空。</p>
 <hr>
 <h2 id="八-常见问题">八、常见问题</h2>

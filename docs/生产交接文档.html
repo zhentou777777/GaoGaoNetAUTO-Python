@@ -563,8 +563,33 @@ Import-Certificate -FilePath .\GaoGaoNetAUTO-sign.cer -CertStoreLocation Cert:\L
 </tr></thead><tbody>
 <tr>
 <td><code>main.py</code></td>
-<td>tkinter 界面、托盘、全部交互编排</td>
-<td><code>App</code> 类、<code>_do_login</code>、<code>_do_takeover</code>、<code>_setup_tray</code></td>
+<td><strong>程序入口</strong>：单实例锁 → 拉起 Web 界面（或 <code>--tk</code> 切 Tk）</td>
+<td><code>main()</code> / <code>_run_web_ui()</code> / <code>_run_tk_ui()</code></td>
+</tr>
+<tr>
+<td><code>core.py</code></td>
+<td><strong>业务控制器</strong>（与界面无关）：认证 / 设备 / 扫码 / 设置 / 账号</td>
+<td><code>Controller.login</code> / <code>takeover</code> / <code>start_qr</code> / <code>save_settings</code> / <code>refresh_devices</code></td>
+</tr>
+<tr>
+<td><code>webui.py</code></td>
+<td><strong>Web 界面服务</strong>（默认）：本地 HTTP + JSON API + SSE 推送</td>
+<td><code>WebApp.start</code> / <code>url()</code> / <code>open_browser()</code></td>
+</tr>
+<tr>
+<td><code>webui/</code></td>
+<td>Web 界面静态资源：HTML / CSS / JS（无框架、无 CDN，离线可用）</td>
+<td><code>index.html</code> / <code>style.css</code> / <code>app.js</code></td>
+</tr>
+<tr>
+<td><code>tkui.py</code></td>
+<td>旧版 tkinter 界面（<code>--tk</code> 兜底），托盘与全部交互</td>
+<td><code>App</code> 类、<code>run_tk_ui()</code></td>
+</tr>
+<tr>
+<td><code>autostart.py</code></td>
+<td>开机自启（启动文件夹 <code>.cmd</code>，不用注册表 Run）</td>
+<td><code>apply_autostart()</code> / <code>autostart_enabled()</code> / <code>migrate_autostart_legacy()</code></td>
 </tr>
 <tr>
 <td><code>auth.py</code></td>
@@ -643,7 +668,7 @@ Import-Certificate -FilePath .\GaoGaoNetAUTO-sign.cer -CertStoreLocation Cert:\L
 </tr>
 <tr>
 <td><code>tests/test_gaogao.py</code></td>
-<td>pytest 套件：55 项（分类判定 / 扫码状态机 / GUI 冒测 / 凭据加密 / 传输安全 / 日志脱敏）</td>
+<td>pytest 套件：<strong>73 项</strong>（分类判定 / 扫码状态机 / GUI 冒测 / 凭据加密 / 传输安全 / 日志脱敏 / <strong>Web 服务鉴权</strong> / <strong>目录 ACL 回归</strong>）</td>
 <td><code>python -m pytest tests/ -v</code></td>
 </tr>
 <tr>
@@ -1616,6 +1641,22 @@ Import-Certificate -FilePath .\GaoGaoNetAUTO-sign.cer -CertStoreLocation Cert:\L
 <td>低</td>
 <td>待办</td>
 <td>精简版（无托盘 / 去 Pillow）或改用 onedir 为主推</td>
+</tr>
+<tr>
+<td><strong>K-23</strong></td>
+<td>目录 ACL 收紧时把<strong>自己挡在门外</strong></td>
+<td>写配置 Permission denied，程序完全不可用且<strong>自己修不回来</strong></td>
+<td><strong>高</strong></td>
+<td><strong>已修复</strong></td>
+<td>根因：<code>SetNamedSecurityInfoW</code> 要 <code>pDacl</code>（ACL 指针），代码却传了整个 SECURITY_DESCRIPTOR → Windows 读 SD 头部得到<strong>损坏的空 DACL</strong>。改用 <code>icacls</code>（先 <code>/grant:r</code> 再 <code>/inheritance:r</code>），并加了 3 条回归测试</td>
+</tr>
+<tr>
+<td><strong>K-24</strong></td>
+<td>Web 界面的本地服务可能被同机程序访问</td>
+<td>读到 Token / 触发认证</td>
+<td>中</td>
+<td><strong>已修复</strong></td>
+<td>只绑 <code>127.0.0.1</code> + URL 带一次性随机令牌 + 所有 API 校验 <code>X-Auth-Token</code>；静态资源做目录穿越防护</td>
 </tr>
 </tbody></table>
 <hr>

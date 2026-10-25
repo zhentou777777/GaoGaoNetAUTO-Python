@@ -21,7 +21,7 @@ import zipfile
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-VERSION = "1.0.0"
+VERSION = "1.0.1"
 PKG_NAME = f"GaoGaoNetAUTO-文档包-v{VERSION}"
 OUT_DIR = HERE / "dist" / "文档包" / PKG_NAME
 

@@ -157,17 +157,20 @@ tr:nth-child(even) td{background:rgba(255,255,255,.015)}
 <p>双击即可，<strong>不需要安装 Python、不需要解压、不需要改文件名</strong>。</p>
 <p>首次运行如果 Windows 弹出「Windows 已保护你的电脑」：</p>
 <ul><li>点「更多信息」→ 「仍要运行」</li><li>这是 PyInstaller 单文件程序的正常提示，不是不安全</li></ul>
-<blockquote><p>想看启动过程，可以在 exe 所在目录按住 Shift 右键 →「在此处打开 PowerShell 窗口」→ 输入：</p><p>```powershell</p><p>.\GaoGaoNetAUTO.exe</p><p>```</p><p>这样会多出一个黑色控制台窗口，里面能看到实时日志。</p></blockquote>
-<h3>收进托盘</h3>
-<p>主窗口右上角的 <strong>✕</strong> 不会退出程序，而是缩到<strong>系统托盘</strong>（右下角小图标区域，可能要拖到箭头里才看得到）。</p>
-<p>托盘图标右键菜单：</p>
+<blockquote><p>想看启动过程，可以在 exe 所在目录按住 Shift 右键 →「在此处打开 PowerShell 窗口」→ 输入：</p><p>```powershell</p><p>.\GaoGaoNetAUTO.exe</p><p>```</p><p>这样会多出一个黑色控制台窗口，里面能看到本地页面的地址。</p></blockquote>
+<h3>界面在浏览器里</h3>
+<p>双击后程序会<strong>自动打开浏览器</strong>，界面是一个跑在 <code>127.0.0.1</code> 的本地网页 （地址形如 <code>http://127.0.0.1:8765/?t=xxxx</code>）。</p>
+<ul><li>这个地址<strong>带一次性令牌</strong>，只在这台机器上有效，不要转发给别人</li><li>地址栏里的 <code>?t=...</code> 可以删掉 —— 删了也能用，程序已经在 Cookie 里记住了</li><li>关掉浏览器页面<strong>不会</strong>退出程序，程序还在后台守着网络</li><li>页面找不到了？地址也写在 <code>%LOCALAPPDATA%\GaoGaoNetAUTO\webui.url</code>，</li></ul>
+<p>或者直接右键托盘图标 →「打开界面」</p>
+<h3>托盘图标</h3>
+<p>界面在浏览器里，但程序本身常驻<strong>系统托盘</strong>（右下角小图标区域， 可能要拖到箭头里才看得到）。托盘图标右键菜单：</p>
 <table><thead><tr>
 <th>菜单项</th>
 <th>作用</th>
 </tr></thead><tbody>
 <tr>
-<td>显示主窗口</td>
-<td>把主窗口叫回来</td>
+<td>打开界面</td>
+<td>重新打开浏览器页面（页面被关掉时用这个）</td>
 </tr>
 <tr>
 <td>立即认证</td>
@@ -188,7 +191,7 @@ tr:nth-child(even) td{background:rgba(255,255,255,.015)}
 <h2 id="第三步-扫码登录-第一次一定要做">第三步：扫码登录（第一次一定要做）</h2>
 <p>这是<strong>不依赖 Token 的路径</strong>，也是所有路径的基础。</p>
 <h3>操作</h3>
-<ol><li>点主窗口的 <strong>「扫码登录」</strong></li><li>弹出一个二维码窗口，状态显示「正在生成二维码…」</li><li>几秒后二维码出现，用手机上的<strong>糕糕 APP</strong> 扫描</li><li>手机上点确认</li><li>电脑上状态变为<strong>绿点「在线」</strong>，日志显示已上线</li></ol>
+<ol><li>点网页上的 <strong>「扫码登录」</strong></li><li>弹出一个二维码弹层，状态显示「正在获取二维码…」</li><li>几秒后二维码出现，用手机上的<strong>糕糕 APP</strong> 扫描</li><li>手机上点确认</li><li>电脑上状态变为<strong>绿点「在线」</strong>，日志显示已上线</li></ol>
 <h3>二维码是怎么来的（了解原理更安心）</h3>
 <p>本工具<strong>不依赖服务端图片</strong>，二维码是在你电脑上本地生成的：</p>
 <pre><code>PC 访问 /web/network/code  →  服务端下发 Set-Cookie: str=&lt;UUID&gt;（会话标识，10 分钟有效）
@@ -198,10 +201,10 @@ tr:nth-child(even) td{background:rgba(255,255,255,.015)}
               本工具用同样的算法在本地还原出 UUID 并渲染成二维码</code></pre>
 <p>也就是说，二维码内容就是这次授权会话的 UUID，<strong>不经过任何第三方</strong>。</p>
 <h3>二维码过期了怎么办</h3>
-<p>10 分钟不扫就会失效。点二维码窗口里的 <strong>「刷新」</strong> 重新生成一张即可。</p>
+<p>10 分钟不扫就会失效。点二维码弹层里的 <strong>「刷新二维码」</strong> 重新生成一张即可。</p>
 <h3>关于&quot;单设备只能登录一台&quot;</h3>
 <p><strong>PC 认证成功后，手机上的校园网会掉线。</strong> 这是学校账号「同时只能一台设备在线」的限制导致的，不是程序 bug。</p>
-<p>想让手机也上，用主窗口的 <strong>「归还名额」</strong> 按钮把位置让回给手机。</p>
+<p>想让手机也上，用网页上的 <strong>「归还名额」</strong> 按钮把位置让回给手机。</p>
 <hr>
 <h2 id="第四步-填账号密码-实现永久免手机">第四步：填账号密码，实现永久免手机</h2>
 <p>这是让&quot;断网自动重连&quot;真正能闭环的一步。</p>
@@ -213,7 +216,7 @@ Content-Type: application/json
 {&quot;mobile&quot;: &quot;&lt;手机号&gt;&quot;, &quot;password&quot;: &quot;&lt;密码&gt;&quot;}</code></pre>
 <p><strong>云高账号体系里，手机号就是登录名。</strong></p>
 <h3>怎么填</h3>
-<ol><li>主窗口<strong>设置区</strong>找到「账号密码（自动续期，可选）」</li><li>填<strong>手机号</strong>和<strong>密码</strong></li><li>点 <strong>「登录并保存」</strong></li></ol>
+<ol><li>网页<strong>设置区</strong>找到「账号密码」</li><li>填<strong>手机号</strong>和<strong>密码</strong></li><li>点 <strong>「登录并保存」</strong></li></ol>
 <p>日志出现这几行就说明成功了：</p>
 <pre><code>正在用账号密码登录云高…
 ★ 账号 138****8888 登录成功，Token 已保存（已加密）
@@ -284,7 +287,7 @@ Content-Type: application/json
 <p>&gt; <strong>最快的入口</strong>：找 <code>hgs.auth.yungao-tech.com/api/network/auth</code> 这条请求—— &gt; 它的请求头就是标准格式的 <code>Authorization: Bearer ...</code>。 &gt; 顺带一提，这条请求的响应体是 <code>{&quot;code&quot;:200,&quot;msg&quot;:&quot;认证成功。&quot;}</code>（36 字节）， &gt; 说明你抓到的 Token 当时是<strong>有效</strong>的。</p>
 <ol><li>点开请求 → <strong>请求头 / Request Headers</strong> → 找到 <code>Authorization</code>：</li></ol>
 <p>``<code> Authorization: Bearer eyJhbGciOi... ^^^^^^^^^^^^^^^^^ 从这里开始复制，到行尾为止 </code>``</p>
-<ol><li>回到电脑主窗口，把这串粘进 <strong>「Bearer Token」</strong> 输入框</li><li>点 <strong>「校验并保存」</strong></li></ol>
+<ol><li>回到电脑网页，把这串粘进 <strong>「Token」</strong> 输入框</li><li>点 <strong>「校验并保存」</strong></li></ol>
 <p>程序会立刻拿这个 Token 去认证验证。验证通过会显示绿色的 Token 健康状态。</p>
 <h3>程序里的「怎么获取？」按钮</h3>
 <p>设置区 Token 输入框旁边有个 <strong>「怎么获取？」</strong> 按钮，点开就是这份图文步骤，不用回来翻教程。</p>
@@ -294,7 +297,7 @@ Content-Type: application/json
 <p><strong>实在拿不到 Token 会怎样？</strong> 程序会自动降级到扫码模式，每 10 分钟才需要你扫一次，其余时间靠自动重认证自愈。</p>
 <hr>
 <h2 id="第五步-设置开机自启">第五步：设置开机自启</h2>
-<ol><li>主窗口设置区勾选 <strong>「开机自动认证」</strong></li><li>点 <strong>「保存设置」</strong></li></ol>
+<ol><li>网页设置区勾选 <strong>「开机自动认证」</strong></li><li>点 <strong>「保存设置」</strong></li></ol>
 <p>程序会往注册表 <code>HKCU\...\Run</code> 写一项，之后开机自动运行并尝试认证。</p>
 <p>想彻底卸载自启：取消勾选 → 保存设置，或者直接删掉 exe（注册表项建议用上面的方式清）。</p>
 <hr>

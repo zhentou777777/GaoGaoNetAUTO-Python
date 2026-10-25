@@ -328,51 +328,63 @@ def _current_user_sid() -> str:
 def harden_dir_acl(path: Path) -> bool:
     """把目录权限收紧到「当前用户 + SYSTEM + Administrators」，断开继承。
 
-    实现走 ``ConvertStringSecurityDescriptorToSecurityDescriptor`` +
-    ``SetNamedSecurityInfo``（纯 ctypes，不起子进程）。
+    实现走 Windows 自带的 ``icacls``（不起子进程做不到等价效果 ——
+    见下面「为什么不用 ctypes」的说明）。
+
+    ⚠️ 这里踩过一个很严重的坑，值得记下来：
+
+    最初用 ctypes 调 ``SetNamedSecurityInfoW``，把
+    ``ConvertStringSecurityDescriptorToSecurityDescriptorW`` 返回的
+    **SECURITY_DESCRIPTOR** 直接当成 ``pDacl`` 传了进去。
+    但那个 API 要的是 **ACL 指针** —— Windows 会按 ACL 结构去读
+    SD 头部那几个字节（AclRevision / AclSize / ACE 数量），
+    得到一个**损坏的空 DACL**。
+
+    后果：目录变成「谁都没权限」，连当前用户自己都进不去 ——
+    写配置直接 Permission denied，程序彻底不可用，而且**程序自己
+    也修不回来**（没有 WRITE_DAC 权限），只能靠 ``icacls /reset``
+    从命令行救。
+
+    所以这里用最朴素可靠的方式：``icacls`` 两步走。
+
+    1) ``/grant:r`` —— 只保留指定三个主体的完全控制
+    2) ``/inheritance:r`` —— 断开继承（对应 SDDL 里的 ``D:P``）
+
+    ⚠️ 顺序不能反：先断开继承的话，``/grant:r`` 可能因为拿不到
+    WRITE_DAC 而失败。授权在前最稳。
+
+    ⚠️ ``/grant`` 里的主体要用**账户名**（当前用户 / SYSTEM /
+    Administrators），不能写裸 SID —— icacls 对裸 SID 会报
+    1332「未将映射到账户名的安全标识符映射」。
     """
     if not _is_windows:
         return False
     try:
-        advapi32 = ctypes.windll.advapi32
-        kernel32 = ctypes.windll.kernel32
-
-        advapi32.ConvertStringSecurityDescriptorToSecurityDescriptorW.argtypes = [
-            ctypes.c_wchar_p, ctypes.c_uint, ctypes.POINTER(ctypes.c_void_p),
-            ctypes.POINTER(ctypes.c_void_p),
-        ]
-        advapi32.ConvertStringSecurityDescriptorToSecurityDescriptorW.restype = wintypes.BOOL
-        advapi32.SetNamedSecurityInfoW.argtypes = [
-            ctypes.c_wchar_p, ctypes.c_int, wintypes.DWORD,
-            ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p,
-        ]
-        advapi32.SetNamedSecurityInfoW.restype = ctypes.c_long
+        import getpass
+        import subprocess
 
         user_sid = _current_user_sid()
         if not user_sid:
             return False
+        user_name = getpass.getuser()
 
-        # D:P = 保护 DACL，不继承
-        # (A;;FA;;;{user})  当前用户完全控制
-        # (A;;FA;;;SY)       SYSTEM
-        # (A;;FA;;;BA)       Administrators
-        sddl = f"D:P(A;;FA;;;{user_sid})(A;;FA;;;SY)(A;;FA;;;BA)"
-        sd = ctypes.c_void_p()
-        if not advapi32.ConvertStringSecurityDescriptorToSecurityDescriptorW(
-            ctypes.c_wchar_p(sddl), 1, ctypes.byref(sd), None
-        ):
+        # 1) 只保留三个主体：当前用户 / SYSTEM / Administrators
+        r1 = subprocess.run(
+            ["icacls", str(path), "/grant:r",
+             f"{user_name}:(F)", "SYSTEM:(F)", "Administrators:(F)"],
+            capture_output=True, text=True,
+            encoding="utf-8", errors="replace", timeout=15,
+        )
+        if r1.returncode != 0:
             return False
-        try:
-            # DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION
-            info = 0x00000004 | 0x80000000
-            # SE_FILE_OBJECT = 1
-            rc = advapi32.SetNamedSecurityInfoW(
-                ctypes.c_wchar_p(str(path)), 1, info,
-                None, None, sd,
-            )
-            return rc == 0
-        finally:
-            kernel32.LocalFree(sd)
+
+        # 2) 断开继承
+        r2 = subprocess.run(
+            ["icacls", str(path), "/inheritance:r"],
+            capture_output=True, text=True,
+            encoding="utf-8", errors="replace", timeout=15,
+        )
+        return r2.returncode == 0
     except Exception:
         return False
 

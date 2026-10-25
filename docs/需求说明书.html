@@ -574,11 +574,57 @@ tr:nth-child(even) td{background:rgba(255,255,255,.015)}
 <td><code>Config.clear_credentials()</code> 抹掉 Token / 上一版 Token / 手机号 / 密码，覆写删除备份文件与临时二维码；界面对应「清除已保存凭据」按钮（二次确认）</td>
 </tr>
 </tbody></table>
-<h3>4.8 界面模块（<code>main.py</code>）</h3>
+<h3>4.8 Web 界面模块（<code>webui.py</code> + <code>core.py</code>）—— 默认入口</h3>
 <table><thead><tr>
 <th>功能</th>
 <th>细节</th>
 </tr></thead><tbody>
+<tr>
+<td>形态</td>
+<td><strong>浏览器里的本地网页</strong>，不是传统桌面窗口</td>
+</tr>
+<tr>
+<td>监听</td>
+<td>只绑 <code>127.0.0.1</code>，不对外网开放</td>
+</tr>
+<tr>
+<td>鉴权</td>
+<td>URL 带<strong>一次性随机令牌</strong>（<code>secrets.token_urlsafe</code>），所有 API 都要带 <code>X-Auth-Token</code> 头；首屏通过 <code>?t=</code> 传并种 HttpOnly Cookie</td>
+</tr>
+<tr>
+<td>实时推送</td>
+<td><strong>SSE</strong>（Server-Sent Events）推送日志与状态变化，比轮询省事</td>
+</tr>
+<tr>
+<td>依赖</td>
+<td><strong>只用标准库</strong> <code>http.server</code>，不引入 Web 框架（打包体积与误报率不受影响）</td>
+</tr>
+<tr>
+<td>静态资源</td>
+<td><code>webui/</code> 目录（HTML / CSS / JS），打包时用 <code>--add-data</code> 打进 exe</td>
+</tr>
+<tr>
+<td>目录穿越</td>
+<td>静态资源路径做规范化 + 越界检查，挡住 <code>../</code> 穿越</td>
+</tr>
+<tr>
+<td>业务逻辑</td>
+<td>全部在 <code>core.py</code>（<code>Controller</code>），与界面无关；Tk 版共用同一套</td>
+</tr>
+<tr>
+<td>入口</td>
+<td><code>main.py</code> → <code>webui.WebApp</code>；加 <code>--tk</code> 切回旧版 Tk 界面</td>
+</tr>
+</tbody></table>
+<h3>4.9 旧版 Tk 界面（<code>tkui.py</code>）—— 兜底</h3>
+<table><thead><tr>
+<th>功能</th>
+<th>细节</th>
+</tr></thead><tbody>
+<tr>
+<td>何时用</td>
+<td>加 <code>--tk</code> 参数；没装浏览器 / 浏览器被策略禁用时的备选路径</td>
+</tr>
 <tr>
 <td>窗口</td>
 <td>可自由缩放，<code>minsize(860,560)</code>，初始 <code>1020x720</code></td>
@@ -700,7 +746,7 @@ tr:nth-child(even) td{background:rgba(255,255,255,.015)}
 <tr>
 <td><strong>可维护性</strong></td>
 <td>模块职责单一</td>
-<td>认证 <code>auth</code> / 配置 <code>config</code> / 守护 <code>netguard</code> / 扫码 <code>qrflow</code> / 账号 <code>acclogin</code> / UI <code>main</code> 分离</td>
+<td>认证 <code>auth</code> / 配置 <code>config</code> / 守护 <code>netguard</code> / 扫码 <code>qrflow</code> / 账号 <code>acclogin</code> / 业务 <code>core</code> / 界面 <code>webui</code>+<code>tkui</code> 分离</td>
 </tr>
 <tr>
 <td><strong>可维护性</strong></td>

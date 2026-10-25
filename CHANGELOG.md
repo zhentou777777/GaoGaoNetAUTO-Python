@@ -6,6 +6,40 @@
 
 ---
 
+## [1.0.1] — 2026-10-25
+
+### 界面改版
+
+**主界面从 tkinter 桌面窗口换成浏览器里的本地网页。**
+
+- 新增 `webui.py`：本地 HTTP 服务（**只用标准库** `http.server`，不引入 Web 框架）
+  - 只监听 `127.0.0.1`，不对外网开放
+  - URL 带**一次性随机令牌**，所有 API 校验 `X-Auth-Token`；
+    首屏通过 `?t=` 传令牌并种 HttpOnly Cookie
+  - 实时日志与状态用 **SSE** 推送
+  - 静态资源做**目录穿越**防护
+- 新增 `core.py`：业务控制器（认证 / 设备 / 扫码 / 设置 / 账号），
+  **与界面完全解耦** —— Web 版和 Tk 版共用同一套认证行为
+- 新增 `webui/`：HTML / CSS / JS，无框架、无 CDN，**离线可用**
+- `main.py` 瘦身成纯入口；旧 Tk 界面挪到 `tkui.py`，加 `--tk` 参数可切回
+- 新增 `autostart.py`：开机自启逻辑从界面层抽出
+
+### 修复
+
+- **目录 ACL 收紧时把自己挡在门外**（高危）：`SetNamedSecurityInfoW` 要的是
+  `pDacl`（ACL 指针），代码却传了整个 SECURITY_DESCRIPTOR，Windows 按 ACL
+  结构读 SD 头部，得到一个**损坏的空 DACL** —— 目录变成「谁都没权限」，
+  连当前用户自己都写不进去，且**程序自己修不回来**。
+  改用 `icacls`（先 `/grant:r` 再 `/inheritance:r`），并补 3 条回归测试。
+- 静态资源缓存：加 `Pragma: no-cache` + 版本号，避免改了 CSS 浏览器不刷新
+
+### 测试
+
+- pytest 套件 58 → **73 项**，全部通过
+  - 新增：Web 服务鉴权 / 目录穿越防护 / 白名单闸门 / 目录 ACL 回归 / 控制器行为
+
+---
+
 ## [1.0.0] — 2026-10-25
 
 首个对外可交付版本。包含打包链路加固、任务栏占用控制，
@@ -45,6 +79,7 @@
 ### 工程化（P2-10 / P2-11 / P2-12）
 
 - 新增 **58 个 pytest 测试**全部通过（含 DPAPI 往返、白名单闸门、日志脱敏、轮转、账号熔断等）
+- 依赖版本全部固定；exe 移出版本控制；新增 `CHANGELOG.md`；文档全面对齐实现并重建 6 份 HTML
 - `.github/workflows/build_windows.yml` 真正落地；修正「先出包后打包单文件版」的顺序错误
 - 依赖版本全部固定（`requirements.txt`），构建可复现
 - `release/` 与 `dist/` 移出版本控制（`.gitignore`），二进制改由 Release 附件分发
@@ -67,4 +102,5 @@
 - 校园网网关为明文 HTTP（协议决定，厂商侧支持才能改）
 - 自签名不等于 SmartScreen 放行，根治需采购正规证书
 
+[1.0.1]: https://github.com/zhentou777777/GaoGaoNetAUTO-Python/releases/tag/v1.0.1
 [1.0.0]: https://github.com/zhentou777777/GaoGaoNetAUTO-Python/releases/tag/v1.0.0

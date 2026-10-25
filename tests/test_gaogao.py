@@ -236,7 +236,7 @@ class TestGuiSmoke:
     def app(self):
         import tkinter as tk
 
-        from main import App
+        from tkui import App
 
         root = tk.Tk()
         root.withdraw()
@@ -272,7 +272,7 @@ class TestGuiSmoke:
 
     def test_reenable_is_safe_without_button(self):
         """没有按钮时 _reenable 不能抛异常。"""
-        from main import App
+        from tkui import App
 
         a = App.__new__(App)
         a.btn_login = None
@@ -301,7 +301,7 @@ class TestGuiSmoke:
             asked["n"] += 1
             return False
 
-        import main as main_mod
+        import tkui as main_mod
 
         monkeypatch.setattr(main_mod.messagebox, "askyesno", fake_ask)
         monkeypatch.setattr(app.cfg, "get_token", lambda: "tok")
@@ -339,7 +339,7 @@ class TestTokenHelpWindow:
     def test_help_window_opens(self):
         import tkinter as tk
 
-        from main import App
+        from tkui import App
 
         root = tk.Tk()
         root.withdraw()
@@ -723,7 +723,7 @@ class TestAccountBreaker:
 
     @needs_tk
     def test_breaker_trips_after_threshold(self, tmp_path, monkeypatch):
-        import main as main_mod
+        import tkui as main_mod
 
         monkeypatch.setenv("GAOGAO_DATA_DIR", str(tmp_path))
         app = main_mod.App.__new__(main_mod.App)
@@ -738,7 +738,7 @@ class TestAccountBreaker:
 
     @needs_tk
     def test_breaker_resets_on_success(self, tmp_path, monkeypatch):
-        import main as main_mod
+        import tkui as main_mod
 
         monkeypatch.setenv("GAOGAO_DATA_DIR", str(tmp_path))
         app = main_mod.App.__new__(main_mod.App)
@@ -755,7 +755,7 @@ class TestAccountBreaker:
 
     @needs_tk
     def test_breaker_expires(self, tmp_path, monkeypatch):
-        import main as main_mod
+        import tkui as main_mod
         import time as time_mod
 
         monkeypatch.setenv("GAOGAO_DATA_DIR", str(tmp_path))
@@ -770,3 +770,193 @@ class TestAccountBreaker:
         # 冷却期过后自动恢复
         app._acct_fail_until = time_mod.time() - 1
         assert app._acct_breaker_open() is False
+
+
+class TestDirAcl:
+    """数据目录 ACL 收紧。
+
+    ⚠️ 这里曾经有过一个很严重的 bug：``SetNamedSecurityInfoW`` 要的是
+    ``pDacl``（ACL 指针），但代码把整个 SECURITY_DESCRIPTOR 塞了进去。
+    Windows 按 ACL 结构读 SD 头部，得到一个**损坏的空 DACL** ——
+    目录变成「谁都没权限」，连当前用户自己都写不进去，
+    而且程序自己都修不回来。
+
+    这个测试就是防止它再犯。
+    """
+
+    @pytest.mark.skipif(os.name != "nt", reason="仅 Windows")
+    def test_harden_dir_acl_keeps_own_access(self, tmp_path):
+        """收紧之后，当前用户必须仍能读写 —— 不能把自己挡在门外。
+
+        这三条断言合在一个测试里：``icacls`` 在临时目录上会被
+        Defender 实时扫描，单跑一次要好几秒，拆开太慢。
+        """
+        import subprocess
+        import vault
+
+        d = tmp_path / "dataroot"
+        d.mkdir()
+
+        ok = vault.harden_dir_acl(d)
+        assert ok, "harden_dir_acl 返回 False"
+
+        # ① 关键：还能写
+        probe = d / "probe.txt"
+        probe.write_text("ok", encoding="utf-8")
+        assert probe.read_text(encoding="utf-8") == "ok"
+
+        # ② 继承应当被断开（D:P 的语义）
+        r = subprocess.run(["icacls", str(d)], capture_output=True, text=True,
+                           encoding="utf-8", errors="replace")
+        assert "(I)" not in r.stdout, r.stdout
+
+        # ③ 重复收紧不应把权限搞坏
+        assert vault.harden_dir_acl(d) is True
+        (d / "x.txt").write_text("ok", encoding="utf-8")
+
+
+class TestWebUI:
+    """本地 Web 界面的服务端行为。
+
+    Web 界面是新的默认入口，它的安全边界靠这组测试守住。
+    """
+
+    @pytest.fixture()
+    def server(self):
+        import webui
+
+        app = webui.WebApp(port=0)
+        app.start()
+        yield app
+        app.stop()
+
+    def _get(self, server, path, token=None, headers=None):
+        import urllib.error
+        import urllib.request
+
+        url = f"http://127.0.0.1:{server.port}{path}"
+        req = urllib.request.Request(url, headers=headers or {})
+        if token:
+            req.add_header("X-Auth-Token", token)
+        try:
+            with urllib.request.urlopen(req, timeout=5) as r:
+                return r.status, r.read()
+        except urllib.error.HTTPError as e:
+            return e.code, e.read()
+
+    def test_index_requires_token(self, server):
+        """没令牌连首页都不给看。"""
+        status, _ = self._get(server, "/")
+        assert status == 403, status
+
+    def test_index_with_token_ok(self, server):
+        # 首屏靠 URL 里的 ?t= 传令牌（浏览器地址栏），不是 header
+        status, body = self._get(server, f"/?t={server.token}")
+        assert status == 200
+        assert "糕糕校园网自动认证" in body.decode("utf-8")
+
+    def test_api_requires_token(self, server):
+        """API 必须鉴权 —— 防止同机其它程序调你的认证接口。"""
+        status, _ = self._get(server, "/api/state")
+        assert status == 401, status
+
+    def test_api_with_token_ok(self, server):
+        status, body = self._get(server, "/api/state", token=server.token)
+        assert status == 200
+        data = body.decode("utf-8")
+        assert "gateway" in data
+
+    def test_binds_localhost_only(self, server):
+        """只监听 127.0.0.1，不对外网开放。"""
+        assert server.host == "127.0.0.1"
+
+    def test_token_is_random(self, server):
+        """每次启动的令牌都不同。"""
+        import webui
+
+        other = webui.WebApp(port=0)
+        assert other.token != server.token
+
+    def test_static_assets_available(self, server):
+        """样式与脚本要能取到。"""
+        for path in ("/static/style.css", "/static/app.js"):
+            status, body = self._get(server, path, token=server.token)
+            assert status == 200, path
+            assert len(body) > 500, path
+
+    def test_path_traversal_blocked(self, server):
+        """目录穿越必须被挡。"""
+        status, _ = self._get(server, "/static/../core.py", token=server.token)
+        assert status in (403, 404), status
+
+    def test_gateway_allowlist_enforced(self, server):
+        """非白名单网关不能通过 API 保存。"""
+        import json
+        import urllib.request
+
+        req = urllib.request.Request(
+            f"http://127.0.0.1:{server.port}/api/settings/save",
+            data=json.dumps({"host": "evil.example.com", "port": 1110}).encode(),
+            headers={"X-Auth-Token": server.token,
+                     "Content-Type": "application/json"},
+            method="POST")
+        with urllib.request.urlopen(req, timeout=5) as r:
+            data = json.loads(r.read().decode("utf-8"))
+        assert data["ok"] is False
+        assert "白名单" in data["message"]
+
+    def test_unknown_api_404(self, server):
+        status, _ = self._get(server, "/api/nope", token=server.token)
+        assert status == 404, status
+
+    def test_url_file_written(self, server):
+        """地址文件要能被写出来（打包版没有控制台，靠它找回入口）。"""
+        p = server.write_url_file()
+        assert p is not None
+        assert p.read_text(encoding="utf-8").strip() == server.url()
+
+
+class TestCoreController:
+    """业务控制器（Web 与 Tk 共用的核心）。"""
+
+    def test_info_snapshot_shape(self):
+        import core
+
+        c = core.Controller()
+        info = c.info_snapshot()
+        for key in ("gateway", "ip", "mac", "has_token", "autostart"):
+            assert key in info, key
+
+    def test_account_masked(self):
+        """手机号只以掩码形式暴露。"""
+        import core
+
+        c = core.Controller()
+        c.cfg.set_account("13800138000", "secret")
+        try:
+            masked = c.account_masked()
+            assert "13800138000" not in masked
+            assert "138" in masked and "8000" in masked
+        finally:
+            c.cfg.clear_credentials()
+
+    def test_breaker_state(self):
+        import core
+
+        c = core.Controller()
+        c._acct_fail_count = 0
+        c._acct_fail_until = 0.0
+        assert c._acct_breaker_open() is False
+        for _ in range(core.Controller.ACCT_BREAKER_THRESHOLD):
+            c._acct_breaker_trip()
+        assert c._acct_breaker_open() is True
+        c._acct_breaker_reset()
+        assert c._acct_breaker_open() is False
+
+    def test_save_settings_rejects_bad_host(self):
+        import core
+
+        c = core.Controller()
+        ok, reason = c.save_settings({"host": "evil.example.com", "port": 1110})
+        assert ok is False
+        assert "白名单" in reason

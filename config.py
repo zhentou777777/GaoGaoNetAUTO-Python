@@ -432,6 +432,11 @@ class Config:
             (self.path.parent / "qr_tmp.png").unlink()
         except Exception:
             pass
+        # Web 界面的地址文件里带一次性令牌，也要抹掉
+        try:
+            (self.path.parent / "webui.url").unlink()
+        except Exception:
+            pass
 
     # -------------------------------------------------- 连接信息
 

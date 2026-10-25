@@ -144,6 +144,29 @@ def build(onefile: bool = False, clean: bool = True) -> int:
         cmd += ["--version-file", str(version_file)]
     if assets.exists():
         cmd += ["--add-data", f"{assets}{os.pathsep}assets"]
+    # Web 界面的静态资源（HTML / CSS / JS）—— 打包后要从 _MEIPASS 里读
+    webui_dir = HERE / "webui"
+    if webui_dir.exists():
+        cmd += ["--add-data", f"{webui_dir}{os.pathsep}webui"]
+
+    # 打包 onefile 前，先把上一轮的 onedir 产物挪走。
+    #
+    # PyInstaller 的 --noconfirm 会删掉同名输出目录，而 onefile 的输出是
+    # dist\NAME.exe、onedir 的是 dist\NAME\ —— 两者同名不同型，Windows
+    # 路径匹配很容易撞车，删目录时更会触发「批量删除」保护。
+    #
+    # 挪到**同一个盘**下的临时目录（跨盘 rename 会失败）。
+    if onefile:
+        stale = HERE / "dist" / NAME
+        if stale.is_dir():
+            stash = HERE / "dist" / f"_stash_{NAME}"
+            try:
+                if stash.exists():
+                    shutil.rmtree(stash, ignore_errors=True)
+                stale.rename(stash)
+                print(f"  （已暂存旧的 onedir 产物 → {stash}）")
+            except Exception as exc:
+                print(f"  （暂存旧 onedir 失败，将让 PyInstaller 自行处理：{exc}）")
 
     cmd.append(str(HERE / "main.py"))
 
