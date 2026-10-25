@@ -1,0 +1,70 @@
+# CHANGELOG
+
+本文件记录糕糕校园网自动认证（GaoGaoNetAUTO-Python）的变更。
+格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
+版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
+
+---
+
+## [1.0.0] — 2026-10-25
+
+首个对外可交付版本。包含打包链路加固、任务栏占用控制，
+以及一轮外部代码评审的 12 条问题修复。
+
+### 安全（P1-6 / P1-7）
+
+- 凭据存储改用 **Windows DPAPI**（`CryptProtectData`，用户绑定、系统级、随机 nonce、自带完整性校验）；
+  DPAPI 不可用时降级为 PBKDF2-HMAC-SHA256(100k) + HMAC-SHA256 认证加密（`v3x:` 前缀）
+- 新增 `vault.py`：加密、目录 ACL 收紧（SDDL `D:P`，仅当前用户 / SYSTEM / Administrators）、凭据覆写删除
+- 配置数据目录从 `C:\GaoGaoNetAUTO\` 迁到 `%LOCALAPPDATA%\GaoGaoNetAUTO\`；
+  旧目录（及 exe 同目录）配置自动迁移一次，并用 DPAPI **重新加密**
+- 手机号由明文改为加密存储；日志中一律显示为 `138****8000`
+- 新增**网关地址白名单**（`config.ALLOWED_HOSTS` / `ALLOWED_SCHEMES` + 端口范围）：
+  保存设置时校验，发请求前**再拦一道**，防止 Token 被误发到非白名单主机
+- 网关为明文 HTTP 时，程序**明确提示** Token 会明文过内网
+- `capture.py` 只写 Authorization **指纹**（存在性 + 长度 + 末 4 位），响应体中的 Token 串自动打码
+- `login_check.py` 默认**交互式**输入口令（不回显、不进 shell 历史）；命令行传密码会显式告警
+- 文档停止推荐「导入根证书」与「整目录 Defender 排除项」，改为「更多信息 → 仍要运行」+ 精确到文件的排除
+
+### 可靠性（P0-2 / P0-3 / P1-8 / P1-9）
+
+- 「检查 Token」改为只读体检（调 `onestatus`），**不再改变在线状态**
+- 「立即认证」默认 `takeover=False`；抢占需二次确认并列出将被踢掉的设备；空 IP 提前退出
+- 扫码状态机重做：结构化提取、去裸 `"success"` 匹配、缓存初始 HTML 不重拉、Event 取消、TTL 对齐、临时文件清理
+- 认证结果解析：`_classify` 先判失败再判成功；`_extract_new_token` 收严，只在成功时提取新 Token
+- 连通性探测从「TCP 握手」改为**带预期内容的 HTTPS 探测**，302/301 等门户劫持重定向一律不算联网
+- 守护线程改盯**出口 IP**（而非网卡 IP），走热点时也能感知地址变化
+- 新增权威在线判据 `is_already_online()`（查服务端在线列表）；
+  原 `is_nat_mode()` 启发式改为保守判据，只作提示、不再作为跳过认证的依据
+- Tk 主线程不再做网络 I/O：`_update_info` / `_refresh_devices` 拆为后台线程 + 队列回主线程渲染
+- 修复帮助窗口 `inner.pack` 崩溃
+- Token 失效时**回退重试**一次上一版 Token（`token_prev` 从死代码变为真实功能）
+- 后台认证 / 抢占 / 扫码流程统一加 `try/finally`：异常时按钮自动恢复、状态不卡死、临时二维码必定清理
+- 账号密码自动登录加**熔断**：连续失败 3 次后暂停 5 分钟，避免错误密码反复重试触发服务端风控
+
+### 工程化（P2-10 / P2-11 / P2-12）
+
+- 新增 **58 个 pytest 测试**全部通过（含 DPAPI 往返、白名单闸门、日志脱敏、轮转、账号熔断等）
+- `.github/workflows/build_windows.yml` 真正落地；修正「先出包后打包单文件版」的顺序错误
+- 依赖版本全部固定（`requirements.txt`），构建可复现
+- `release/` 与 `dist/` 移出版本控制（`.gitignore`），二进制改由 Release 附件分发
+- 新增 `logs.py`：统一落盘日志 + 自动轮转（512KB × 3）+ 脱敏
+- 清理死代码：`_same_subnet` / `one_status` / `_selfheal_brief` / `_token_brief`，
+  以及未用配置键 `keep_token_alive` / `status_url` / `complete_url`
+- 新增「清除已保存凭据」按钮（二次确认），一键抹掉 Token / 手机号 / 密码及备份文件
+- 文档全面对齐实现：需求说明书 / 生产交接文档 / 使用教程 / Defender 排查，并重建 6 份 HTML
+
+### 打包与分发
+
+- 目录版（onedir）为主推形态，单文件版（onefile）备用
+- 去除 UPX、加入版本资源、自签名（SHA256 + 可信时间戳）
+- 产物特征自检（`tools/audit_features.py`）接入构建流程，不通过直接失败
+
+### 已知遗留
+
+- `main.py` / `auth.py` 仍是 God Object，待拆分
+- 70+ 处 `except Exception: pass` 待统一异常类型
+- 校园网网关为明文 HTTP（协议决定，厂商侧支持才能改）
+- 自签名不等于 SmartScreen 放行，根治需采购正规证书
+
+[1.0.0]: https://github.com/zhentou777777/GaoGaoNetAUTO-Python/releases/tag/v1.0.0

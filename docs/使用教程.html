@@ -218,11 +218,13 @@ Content-Type: application/json
 <pre><code>正在用账号密码登录云高…
 ★ 账号 138****8888 登录成功，Token 已保存（已加密）
 账号密码已保存——以后 Token 失效会自动换新的，断网也能自愈</code></pre>
-<p>密码和 Token 用同一套加密方案（机器指纹派生密钥 + HMAC 校验）存在 <code>config.json</code> 里， <strong>文件里是密文，换一台电脑解不开</strong>。</p>
+<p>密码和 Token 用同一套加密方案（<strong>Windows DPAPI</strong>，系统级、用户绑定、随机 nonce）存在 <code>%LOCALAPPDATA%\GaoGaoNetAUTO\config.json</code> 里，<strong>文件里是密文，换一台电脑或换用户都解不开</strong>。</p>
+<blockquote><p>想抹掉本机保存的凭据：设置区底部点 <strong>「清除已保存凭据」</strong>（会二次确认），</p><p>Token / 上一版 Token / 手机号 / 密码会一并抹掉，备份文件也覆写删除。</p></blockquote>
 <h3>不想在程序里填？先单独测一下</h3>
 <p>怕填错、或想知道云高是否认你的账号，可以先在命令行测（<strong>不会保存任何东西</strong>）：</p>
-<pre><code>python login_check.py &lt;手机号&gt; &lt;密码&gt;</code></pre>
-<p>它会打印服务端原始应答和错误分类。</p>
+<pre><code>python login_check.py</code></pre>
+<p>它会<strong>交互式</strong>问你要手机号和密码（密码不回显、不进 shell 历史），然后打印服务端原始应答和错误分类。</p>
+<blockquote><p>也可以只把手机号写在命令行：<code>python login_check.py 13800138000</code> —— 密码仍然走交互输入。</p><p><strong>不建议</strong>把密码也写进命令行：同机其他账号通过进程列表就能看到。</p></blockquote>
 <h3>各种错误的含义</h3>
 <table><thead><tr>
 <th>程序提示</th>
@@ -531,10 +533,10 @@ logout?ip=&lt;手机IP&gt; → auth?ip=      自动顶替手机（需先填手�
 <h3>Q：想换个学校用</h3>
 <p>改设置里的<strong>认证网关</strong>主机和端口，保存后重启程序。本工具不硬编码任何学校信息。</p>
 <h3>Q：exe 被杀毒软件误报</h3>
-<p>PyInstaller 单文件程序常见的误报。添加信任/白名单即可。程序本身开源，全部代码可查。</p>
+<p>PyInstaller 单文件程序常见的误报（SmartScreen 信誉问题，非中毒）。 最省事的做法：点「更多信息」→「仍要运行」。程序本身开源，全部代码可查； 需要彻底消除告警请看 <code>docs/Defender-误报排查.md</code>（<strong>推荐用目录版</strong>，误报率最低）。</p>
 <h3>Q：Token 安全吗</h3>
-<p>Token 用<strong>机器指纹派生的密钥</strong>加密后存在 exe 同目录的 <code>config.json</code> 里：</p>
-<ul><li>文件里是密文，不是明文</li><li>换一台电脑 / 换用户，密文解不开</li><li>复制别人的 config.json 到你电脑上也没用</li></ul>
+<p>Token 用 <strong>Windows DPAPI</strong>（系统级、用户绑定）加密后存在 <code>%LOCALAPPDATA%\GaoGaoNetAUTO\config.json</code> 里：</p>
+<ul><li>文件里是密文，不是明文（手机号、密码同样加密）</li><li>换一台电脑 / 换用户，密文解不开</li><li>复制别人的 config.json 到你电脑上也没用</li><li>目录权限已收紧，同机其他账号读写不了</li></ul>
 <hr>
 <h2 id="进阶玩法">进阶玩法</h2>
 <h3>Token 寿命实验</h3>
@@ -555,12 +557,12 @@ python main.py          # 直接跑
 python build_exe.py     # 打包成 exe</code></pre>
 <hr>
 <h2 id="附-配置文件说明">附：配置文件说明</h2>
-<p><code>config.json</code> 生成在 <strong>exe 同目录</strong>，长这样：</p>
+<p><code>config.json</code> 生成在 <strong><code>%LOCALAPPDATA%\GaoGaoNetAUTO\</code></strong>（与 exe 位置无关），长这样：</p>
 <pre><code>{
   &quot;host&quot;: &quot;hgs.auth.yungao-tech.com&quot;,
   &quot;port&quot;: 1110,
   &quot;phone_ip&quot;: &quot;&quot;,
-  &quot;token&quot;: &quot;v1:...(加密后的密文)&quot;,
+  &quot;token&quot;: &quot;dpapi:...(加密后的密文)&quot;,
   &quot;autostart&quot;: true,
   &quot;auto_kick_phone&quot;: true,
   &quot;last_ip&quot;: &quot;10.135.130.202&quot;,
@@ -571,8 +573,8 @@ python build_exe.py     # 打包成 exe</code></pre>
 <th>说明</th>
 </tr></thead><tbody>
 <tr>
-<td><code>host</code> / <code>port</code></td>
-<td>认证网关地址，换学校改这两个</td>
+<td><code>host</code> / <code>port</code> / <code>scheme</code></td>
+<td>认证网关地址，换学校改这三个；<strong>必须在白名单内</strong>（<code>hgs.auth.yungao-tech.com</code> / <code>user.v4.yungao-tech.com</code>），否则程序会拒绝保存并拒绝发送 Token</td>
 </tr>
 <tr>
 <td><code>phone_ip</code></td>
@@ -580,11 +582,15 @@ python build_exe.py     # 打包成 exe</code></pre>
 </tr>
 <tr>
 <td><code>token</code></td>
-<td>加密后的 Token（<code>v1:</code> 前缀表示加密格式）</td>
+<td>加密后的 Token（<code>dpapi:</code> 前缀表示 DPAPI 格式，<code>v3x:</code> 表示降级加密格式）</td>
 </tr>
 <tr>
 <td><code>token_prev</code></td>
 <td>上一版 Token，续存失败时回退用</td>
+</tr>
+<tr>
+<td><code>account_mobile</code> / <code>account_password</code></td>
+<td>云高账号手机号与密码，<strong>均加密存储</strong></td>
 </tr>
 <tr>
 <td><code>autostart</code></td>
@@ -592,7 +598,7 @@ python build_exe.py     # 打包成 exe</code></pre>
 </tr>
 <tr>
 <td><code>auto_kick_phone</code></td>
-<td>名额被占时自动顶替手机</td>
+<td>名额被占时自动顶替手机（默认关）</td>
 </tr>
 <tr>
 <td><code>wlan_acname</code> / <code>paip</code> / <code>vlan</code></td>
@@ -603,6 +609,7 @@ python build_exe.py     # 打包成 exe</code></pre>
 <td>上次认证的出口 IP 与结果，用于判断 IP 是否漂移</td>
 </tr>
 </tbody></table>
+<blockquote><p>同目录还有 <code>config.json.bak</code>（自动备份）、<code>logs/app.log</code>（脱敏后的运行日志）。</p><p>想彻底重来就点设置区的「清除已保存凭据」。</p></blockquote>
 <blockquote><p>手改配置前先关掉程序（托盘图标右键 → 退出），否则退出时会把内存里的值写回去覆盖你的修改。</p></blockquote>
 <hr>
 <h2 id="一句话总结">一句话总结</h2>

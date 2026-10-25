@@ -17,6 +17,7 @@ from typing import Callable, Optional
 import tkinter as tk
 from tkinter import messagebox
 
+import logs
 from auth import (
     DEVICE_LIMIT,
     NOT_AUTH,
@@ -24,10 +25,10 @@ from auth import (
     TOKEN_INVALID,
     CampusAuth,
 )
-from config import Config, app_dir, data_dir
+from config import Config, app_dir, data_dir, logs_dir
 from icons import ensure_icons
 from netguard import NetGuard
-from qrflow import QrAssistant
+from qrflow import QrAssistant, SESSION_TTL_MINUTES
 from taskbar import (
     activate_existing_instance,
     acquire_single_instance,
@@ -276,11 +277,25 @@ class App:
         self._qr_win: Optional[tk.Toplevel] = None
         self._qr_img: Optional[tk.PhotoImage] = None
         self._qr_assistant: Optional[QrAssistant] = None
+        # 扫码轮询的取消令牌（关窗/刷新时置位）
+        self._qr_cancel: Optional[threading.Event] = None
         self._silent = silent
         self._quitting = False
         self._status = ("unknown", "尚未认证", TEXT3)
         self._tray = None
         self._tray_autostart = None
+        # 「立即认证」按钮引用（_build_actions 里赋值）。
+        # 先置 None，任何早于界面构建的路径都不会踩 AttributeError。
+        self.btn_login = None
+        # 状态卡数据缓存 —— 网络 I/O 在后台线程做，主线程只渲染缓存值
+        self._cached_ip = ""
+        self._cached_mac = ""
+        self._cached_devices = ""
+        # 账号密码自动登录的熔断器状态：
+        # 密码错一次就把错误密码存下来并反复重试，只会锁死账号或触发风控。
+        # 连续失败 N 次后暂停一段时间，期间不再自动尝试。
+        self._acct_fail_count = 0
+        self._acct_fail_until = 0.0
 
         self._build()
         self._migrate_autostart_legacy()
@@ -433,8 +448,10 @@ class App:
         bar.pack(fill="x", pady=(14, 0))
 
         # (文案, 回调, 样式, 图标, 优先占两列)
+        # 「立即认证」= 普通认证，**不抢占**。踢设备是破坏性操作，
+        # 必须由用户明确走「抢占上线」并二次确认。
         items = [
-            ("立即认证", lambda: self._do_login(takeover=True), "accent", "⚡", True),
+            ("立即认证", lambda: self._do_login(takeover=False), "accent", "⚡", True),
             ("扫码登录", self._open_qr, "ghost", "▣", False),
             ("抢占上线", self._do_takeover, "ghost", "⇄", False),  # 独立实现
             ("在线设备", self._do_show_devices, "ghost", "▤", False),
@@ -446,6 +463,10 @@ class App:
             b = Pill(bar, text, cmd, height=42, width=150,
                      style=style, icon=icon)
             self._action_buttons.append((b, wide))
+            # 「立即认证」按钮需要被 _do_login / _reenable 引用来禁用与恢复，
+            # 必须在构建时保存引用，否则按钮禁用逻辑会抛 AttributeError。
+            if text == "立即认证":
+                self.btn_login = b
             b.grid(row=0, column=0, sticky="ew", padx=(0, 8), pady=(0, 8))
 
         # 网格列按窗口宽度自适应：能放 3 个就放 3 个，放不下自动换行。
@@ -552,7 +573,8 @@ class App:
         self._label(inner, "登录密码")
         self.var_pwd, _ = self._entry(inner, "", show="•")
         self._hint(inner, "填了之后 Token 失效会自动换新的，断网也能自己接上。\n"
-                          "密码用机器指纹派生密钥加密后存储，配置里是密文。")
+                          "密码用 Windows DPAPI（用户绑定、系统级）加密存储，\n"
+                          "配置文件里只有密文，换用户或换机器都解不开。")
         arow = tk.Frame(inner, bg=CARD)
         arow.pack(fill="x", pady=(10, 0))
         Pill(arow, "登录并保存", self._do_save_account, accent=True,
@@ -605,6 +627,8 @@ class App:
              height=36, width=118).pack(side="left")
         Pill(brow, "Token 寿命实验", self._run_tokenlab, height=36,
              width=126, style="ghost").pack(side="left", padx=(8, 0))
+        Pill(brow, "清除已保存凭据", self._do_clear_credentials, height=36,
+             width=126, style="ghost").pack(side="left", padx=(8, 0))
 
     def _check(self, parent, text, var):
         cb = tk.Checkbutton(
@@ -624,6 +648,12 @@ class App:
         self.lbl_badge.configure(text=badge)
 
     def log(self, msg: str):
+        # 同时写进日志文件（自动脱敏 + 轮转），
+        # 方便关掉程序后回看问题出在哪。
+        try:
+            logs.info(msg)
+        except Exception:
+            pass
         self.q.put(("log", f"[{time.strftime('%H:%M:%S')}] {msg}"))
 
     def _clear_log(self):
@@ -647,6 +677,11 @@ class App:
                     self.set_status(state, text, color, badge)
                 elif kind == "info":
                     self._update_info()
+                elif kind == "info_render":
+                    # 后台线程取回状态数据后，重新渲染（不触发新的网络请求）
+                    self._render_info()
+                elif kind == "devices":
+                    self._render_devices(payload[0], payload[1], payload[2])
                 elif kind == "qr":
                     self._render_qr(payload)
                 elif kind == "qrstate":
@@ -668,18 +703,54 @@ class App:
                 self.root.after(120, self._drain)
 
     def _update_info(self):
-        ip = self.auth.detect_local_ip()
-        mac = self.auth.detect_mac()
+        """刷新状态卡。
+
+        ⚠️ 这里做的是**网络 I/O**（探测出口 IP、查在线设备），
+        直接在 Tk 主线程里做会让窗口卡死几秒。所以拆成两步：
+        先用已有的缓存立即渲染，再丢到后台线程取新数据，
+        回来后通过队列更新。
+        """
+        ip = self._cached_ip or ""
         self.lbl_info.configure(
             text=(
                 f"认证网关   {self.cfg.base_url}\n"
                 f"本机出口   {ip or '未探测到（可能未连校园网）'}\n"
-                f"MAC 地址   {mac or '未探测到'}\n"
+                f"MAC 地址   {self._cached_mac or '未探测到'}\n"
                 f"占用名额   {self.cfg.get('last_ip') or ip or '未知'}\n"
-                f"在线设备   {self._devices_brief()}"
+                f"在线设备   {self._cached_devices or '查询中…'}"
             )
         )
         self._update_heal_bar()
+        # 后台取最新数据
+        threading.Thread(target=self._update_info_bg, daemon=True).start()
+
+    def _render_info(self):
+        """用已缓存的数据渲染状态卡（纯 UI，不再发网络请求）。"""
+        ip = self._cached_ip or ""
+        self.lbl_info.configure(
+            text=(
+                f"认证网关   {self.cfg.base_url}\n"
+                f"本机出口   {ip or '未探测到（可能未连校园网）'}\n"
+                f"MAC 地址   {self._cached_mac or '未探测到'}\n"
+                f"占用名额   {self.cfg.get('last_ip') or ip or '未知'}\n"
+                f"在线设备   {self._cached_devices or '查询中…'}"
+            )
+        )
+        self._update_heal_bar()
+
+    def _update_info_bg(self):
+        """后台线程：探测 IP/MAC + 查在线设备，再回主线程渲染。"""
+        try:
+            ip = self.auth.detect_local_ip()
+            mac = self.auth.detect_mac()
+            devices = self._devices_brief()
+        except Exception as exc:
+            self.log(f"状态刷新异常: {exc}")
+            return
+        self._cached_ip = ip
+        self._cached_mac = mac
+        self._cached_devices = devices
+        self.q.put(("info_render", None))
 
     def _other_devices(self, my_ip: str = "") -> list:
         """列出占用名额的其他设备 IP。"""
@@ -724,24 +795,6 @@ class App:
         self.bar_heal.configure(bg=bg)
         self.lbl_heal.configure(bg=bg, fg=fg, text=text)
 
-    def _selfheal_brief(self) -> str:
-        """一句话说明自愈能力状态。"""
-        if self.cfg.has_account():
-            base = "已就绪（账号密码自动换 Token）"
-        elif self.cfg.has_token():
-            base = "已就绪（用现有 Token，失效需重抓）"
-        else:
-            base = "未就绪（需填账号密码或扫码）"
-        if bool(self.cfg.get("autostart")):
-            base += " · 开机自启已开"
-        return base
-
-    def _token_brief(self) -> str:
-        t = self.cfg.get_token()
-        if not t:
-            return "未设置"
-        return f"已设置（{t[:6]}…{t[-4:]}）"
-
     # ------------------------------------------------------------ 设置读写
 
     def _load_settings(self):
@@ -750,16 +803,25 @@ class App:
         self.var_host.set(str(self.cfg.get("host") or ""))
         self.var_port.set(str(self.cfg.get("port") or ""))
         self.var_autostart.set(self._autostart_enabled())
-        self.var_kick.set(bool(self.cfg.get("auto_kick_phone", True)))
+        self.var_kick.set(bool(self.cfg.get("auto_kick_phone", False)))
         self._update_info()
 
     def _do_save_settings(self):
-        self.cfg.set("phone_ip", self.var_phone_ip.get().strip())
-        self.cfg.set("host", self.var_host.get().strip() or "hgs.auth.yungao-tech.com")
+        # 网关地址先校验：不在白名单内的地址会让「保存」变成一次
+        # 把 Token 发到第三方的隐患，所以当场拦下。
+        host = self.var_host.get().strip() or "hgs.auth.yungao-tech.com"
         try:
-            self.cfg.set("port", int(self.var_port.get().strip() or 1110))
+            port = int(self.var_port.get().strip() or 1110)
         except ValueError:
-            self.cfg.set("port", 1110)
+            port = 1110
+        ok, reason = self.cfg.validate_gateway(host, str(self.cfg.get("scheme") or "http"), port)
+        if not ok:
+            messagebox.showwarning("网关地址不被接受", reason, parent=self.root)
+            return
+
+        self.cfg.set("phone_ip", self.var_phone_ip.get().strip())
+        self.cfg.set("host", host)
+        self.cfg.set("port", port)
         self.cfg.set("auto_kick_phone", bool(self.var_kick.get()))
         self.cfg.set("autostart", bool(self.var_autostart.get()))
         self._apply_autostart(bool(self.var_autostart.get()))
@@ -796,7 +858,96 @@ class App:
         self.log("Token 已加密保存，正在校验…")
         threading.Thread(target=self._check_token_bg, daemon=True).start()
 
+    def _do_clear_credentials(self):
+        """清除本机已保存的所有凭据（Token / 手机号 / 密码）。
+
+        场景：换人用这台电脑、怀疑凭据泄露、想彻底重来。
+        """
+        if not (self.cfg.has_token() or self.cfg.has_account()):
+            self.log("本机没有已保存的凭据，无需清除")
+            return
+        ans = messagebox.askyesno(
+            "清除已保存凭据",
+            "将删除本机保存的 Token、手机号与密码。\n\n"
+            "清除后需要重新扫码或重新填写账号密码才能自动认证。\n"
+            "确定继续吗？",
+            parent=self.root,
+        )
+        if not ans:
+            return
+        try:
+            self.cfg.clear_credentials()
+        except Exception as exc:
+            self.log(f"清除凭据失败：{exc}")
+            return
+        # 同步清空界面上的输入框，避免密文残留在内存里
+        try:
+            self.var_token.set("")
+            self.var_mobile.set("")
+            self.var_pwd.set("")
+        except Exception:
+            pass
+        self.log("已清除本机保存的 Token、手机号与密码")
+        self._update_heal_bar()
+        self.q.put(("info", None))
+
     # ------------------------------------------------------------ 账号密码
+
+    # 账号密码自动登录熔断参数
+    ACCT_BREAKER_THRESHOLD = 3      # 连续失败多少次后熔断
+    ACCT_BREAKER_COOLDOWN = 300.0   # 熔断持续秒数（5 分钟）
+
+    def _acct_breaker_open(self) -> bool:
+        """熔断器是否处于「暂停自动尝试」状态。"""
+        if self._acct_fail_until <= time.time():
+            return False
+        return True
+
+    def _acct_breaker_trip(self):
+        """记一次失败；达到阈值就熔断。"""
+        self._acct_fail_count += 1
+        if self._acct_fail_count >= self.ACCT_BREAKER_THRESHOLD:
+            self._acct_fail_until = time.time() + self.ACCT_BREAKER_COOLDOWN
+            left = int(self.ACCT_BREAKER_COOLDOWN)
+            self.log(f"账号密码连续失败 {self._acct_fail_count} 次，"
+                     f"已暂停自动尝试 {left} 秒（避免触发服务端风控）")
+
+    def _acct_breaker_reset(self):
+        self._acct_fail_count = 0
+        self._acct_fail_until = 0.0
+
+    def _auto_login_account(self) -> str:
+        """用已保存的账号密码换一个 Token。
+
+        返回新 Token；失败返回空串。带熔断，失败不会无限重试。
+        """
+        if self._acct_breaker_open():
+            left = int(self._acct_fail_until - time.time())
+            self.log(f"账号密码自动登录已熔断，{left} 秒后再试（期间可手动扫码）")
+            return ""
+
+        mobile, pwd = self.cfg.get_account()
+        if not (mobile and pwd):
+            return ""
+
+        try:
+            from acclogin import AccountLogin, mask_mobile
+
+            lr = AccountLogin().login(mobile, pwd)
+        except Exception as exc:
+            self._acct_breaker_trip()
+            self.log(f"自动换 Token 异常: {exc}")
+            return ""
+
+        if not (lr.ok and lr.token):
+            self._acct_breaker_trip()
+            self.log(f"自动换 Token 失败：{lr.message}")
+            return ""
+
+        self._acct_breaker_reset()
+        self.cfg.set_token(lr.token)
+        self.log(f"★ 已换取新 Token（账号 {mask_mobile(mobile)}）")
+        return lr.token
 
     def _do_save_account(self):
         """用账号密码登录换取 Token，成功后一并保存（免去抓包）。"""
@@ -816,20 +967,24 @@ class App:
 
             lr = AccountLogin().login(mobile, pwd)
         except Exception as exc:
+            self._acct_breaker_trip()
             self.log(f"账号登录异常: {exc}")
             self.q.put(("status", ("error", "账号登录失败", ERR_C, "")))
             return
 
         if not lr.ok:
+            self._acct_breaker_trip()
             self.log(f"账号登录失败：{lr.message}")
             self.q.put(("status", ("error", "账号登录失败", ERR_C, "")))
             return
 
         if not lr.token:
+            self._acct_breaker_trip()
             self.log(f"账号登录成功但未取到 Token：{lr.message}")
             self.q.put(("status", ("error", "未取到 Token", ERR_C, "")))
             return
 
+        self._acct_breaker_reset()
         # 保存账号（加密）与新 Token
         self.cfg.set_account(mobile, pwd)
         self.cfg.set_token(lr.token)
@@ -840,7 +995,7 @@ class App:
         # 顺手认证一次，确认真的能上网
         ip = self.auth.detect_local_ip()
         res = self.auth.login_chain(ip, lr.token, str(self.cfg.get("phone_ip") or ""),
-                                     bool(self.cfg.get("auto_kick_phone", True)))
+                                     bool(self.cfg.get("auto_kick_phone", False)))
         if res.ok:
             self.cfg.set("last_ip", ip)
             self.cfg.set("last_auth_ok", True)
@@ -875,19 +1030,43 @@ class App:
     # ------------------------------------------------------------ 认证动作
 
     def _do_login(self, takeover: bool = False):
-        self.btn_login.set_enabled(False)
+        # 按钮可能因异常流程而不存在，这里不硬依赖它 —— 认证本身要能跑起来。
+        btn = getattr(self, "btn_login", None)
+        if btn is not None:
+            try:
+                btn.set_enabled(False)
+            except Exception:
+                pass
         self.set_status("working", "正在认证…", WARN_C)
         threading.Thread(target=self._login_bg, args=(takeover,),
                          daemon=True).start()
 
     def _reenable(self):
-        self.btn_login.set_enabled(True)
+        btn = getattr(self, "btn_login", None)
+        if btn is None:
+            return
+        try:
+            btn.set_enabled(True)
+        except Exception:
+            pass
 
     def _login_bg(self, takeover: bool = False):
         """takeover=True 表示用户主动要求"电脑接管"（可踢掉占用设备）。
 
         自动重连场景传 False —— 否则会和手机互相踢，形成抢登录死循环。
         """
+        try:
+            self._login_bg_inner(takeover)
+        except Exception as exc:
+            # 后台线程里未捕获的异常会让按钮永远停在「禁用」状态，
+            # 界面看起来像卡死了 —— 这里兜住并如实报错。
+            self.log(f"认证流程异常：{exc}")
+            self.q.put(("status", ("error", "认证流程出错", ERR_C, "")))
+        finally:
+            self.q.put(("call", self._reenable))
+            self.q.put(("info", None))
+
+    def _login_bg_inner(self, takeover: bool = False):
         ip = self.auth.detect_local_ip()
         if not ip:
             self.log("未探测到本机出口 IP，请确认已连接校园网")
@@ -899,21 +1078,23 @@ class App:
         # 本机走手机热点时，出口 IP 是手机的 IP，手机认证后整个局域网
         # 都已被 NAT 放行 —— PC **不需要**再单独认证一次，
         # 而且再认证反而会因为「套餐只支持单设备」把手机挤掉。
-        if self.auth.is_nat_mode():
-            from netguard import probe_online
+        #
+        # ⚠️ 判据必须是**服务端的在线列表**（权威），不能只靠本地
+        # 「像不像 NAT」的启发式 —— 那个启发式在直连校园网时同样成立，
+        # 会导致本该做的认证被跳过。
+        token_now = self.cfg.get_token()
+        if token_now and self.auth.is_already_online(ip, token_now):
+            self.log("服务端在线列表里已有本机出口 IP —— 已经在线，无需重复认证")
+            self.cfg.set("last_ip", ip)
+            self.cfg.set("last_auth_ok", True)
+            self.q.put(("status", ("online", "已在线", OK_C, f"出口 {ip}")))
+            self.q.put(("info", None))
+            self.q.put(("call", self._reenable))
+            return
 
-            if probe_online():
-                self.log("检测到本机走手机热点且外网已连通 —— "
-                         "手机已认证并为本机放行，无需重复认证")
-                self.cfg.set("last_ip", ip)
-                self.cfg.set("last_auth_ok", True)
-                self.q.put(("status", ("online", "共享在线（经手机热点）", OK_C,
-                                       f"出口 {ip}")))
-                self.q.put(("info", None))
-                self.q.put(("call", self._reenable))
-                return
-            self.log("检测到本机走手机热点，但外网尚未连通 —— "
-                     "请先在手机上完成认证")
+        # 启发式只作提示，不再作为「跳过认证」的依据
+        if self.auth.is_nat_mode():
+            self.log("检测到本机走手机热点（经 NAT）——将继续确认是否需要认证")
 
         # ── 直连校园网：按服务端在线列表决定要不要动别人 ──────────
         # 若在线列表里已有别的设备（通常是手机），且本机不在其中，
@@ -923,19 +1104,7 @@ class App:
             # 没有 Token：若配了账号密码，先自动换一个；否则才降级到扫码
             if self.cfg.has_account():
                 self.log("没有可用 Token，正在用账号密码自动换取…")
-                try:
-                    from acclogin import AccountLogin, mask_mobile
-
-                    mobile, pwd = self.cfg.get_account()
-                    lr = AccountLogin().login(mobile, pwd)
-                    if lr.ok and lr.token:
-                        self.cfg.set_token(lr.token)
-                        token = lr.token
-                        self.log(f"★ 已换取新 Token（账号 {mask_mobile(mobile)}）")
-                    else:
-                        self.log(f"自动换 Token 失败：{lr.message}")
-                except Exception as exc:
-                    self.log(f"自动换 Token 异常: {exc}")
+                token = self._auto_login_account()
 
         if not token:
             self.log("没有 Token，改走扫码流程")
@@ -951,16 +1120,32 @@ class App:
             takeover=takeover,
         )
 
+        # 当前 Token 判定失效 → 回退试一次上一版 Token。
+        # （`token_prev` 是服务端下发新 Token 时自动留的备份。）
+        if (not res.ok) and res.token_invalid:
+            prev = self.cfg.get_token_prev()
+            if prev and prev != token:
+                self.log("当前 Token 已失效，正在尝试回退到上一版 Token…")
+                res2 = self.auth.login_chain_self_heal(
+                    ip, prev, str(self.cfg.get("phone_ip") or ""),
+                    False,   # 回退不抢占
+                    self.cfg.get_account(),
+                    takeover=False,
+                )
+                if res2.ok:
+                    self.log("★ 回退到上一版 Token 成功")
+                    self.cfg.set_token(prev)
+                    res = res2
+
         # L1 自动续存：服务端下发了新 Token 就立刻换掉
+        #
+        # ⚠️ 只有认证**成功**时才存新 Token。
+        # 失败响应里也可能带 token 字段（CSRF / refresh / 错误信息里的串），
+        # 存进去会把本来还能用的 Token 覆盖掉，导致「本来能用突然不能用」。
         if res.ok and res.new_token and res.new_token != token:
             self.cfg.set("token_prev", self.cfg.get("token"))
             self.cfg.set_token(res.new_token)
             self.log("★ 检测到服务端下发了新 Token，已自动续存")
-        elif res.new_token and res.new_token != token:
-            # 自愈换到的新 Token 也要存下来，否则下次又从旧 Token 开始
-            self.cfg.set("token_prev", self.cfg.get("token"))
-            self.cfg.set_token(res.new_token)
-            self.log("★ 新 Token 已保存")
 
         if res.ok:
             self.cfg.set("last_ip", ip)
@@ -993,20 +1178,48 @@ class App:
                 self.q.put(("status", ("error", "认证接口不可达", ERR_C, "请确认已连校园网")))
             else:
                 self.q.put(("status", ("error", "认证失败", ERR_C, "")))
-        self.q.put(("info", None))
-        self.q.put(("call", self._reenable))
 
     def _do_takeover(self):
         """抢占上线：踢掉占用名额的设备，然后让本机上线。
 
         单设备套餐下服务端只允许一个 IP 在线。本机被别的设备（通常是手机）
         挡住时，这条路径能主动把对方下线再接管——用户明确要求的能力。
+
+        ⚠️ 这是**破坏性操作**：会把其他设备（通常是手机）踢下线。
+        所以必须二次确认，并明确列出将要被踢的设备。
         """
         token = self.cfg.get_token()
         if not token:
             self.log("没有 Token，无法抢占——请先扫码登录或填账号密码")
             self.q.put(("status", ("error", "缺少 Token", ERR_C, "请先扫码登录")))
             return
+
+        # 先查清楚现在有谁在线，列给用户看再决定
+        my_ip = self.auth.detect_local_ip()
+        try:
+            devices = self.auth.online_devices(token)
+        except Exception:
+            devices = []
+        others = [str(d.get("ip", "")) for d in devices
+                  if str(d.get("ip", "")) and str(d.get("ip", "")) != my_ip]
+
+        if others:
+            detail = "、".join(others)
+            msg = (f"即将下线以下设备并接管名额：\n\n{detail}\n\n"
+                   f"这些设备会立刻断网。确定继续吗？")
+        else:
+            msg = ("即将尝试接管名额。\n\n"
+                   "如果名额正被手机占用，手机会被踢下线。确定继续吗？")
+
+        try:
+            ans = messagebox.askyesno("确认抢占上线", msg, parent=self.root)
+        except Exception:
+            ans = False
+        if not ans:
+            self.log("已取消抢占")
+            self.q.put(("status", ("idle", "已取消抢占", TEXT3, "")))
+            return
+
         self.log("正在抢占上线…")
         threading.Thread(target=self._takeover_bg, daemon=True).start()
 
@@ -1016,25 +1229,36 @@ class App:
         复用认证链的 takeover 分支，行为与「立即认证」一致，
         但额外做 Token 自愈 —— 抢占时 Token 常已过期。
         """
+        try:
+            self._takeover_bg_inner()
+        except Exception as exc:
+            self.log(f"抢占流程异常：{exc}")
+            self.q.put(("status", ("error", "抢占流程出错", ERR_C, "")))
+        finally:
+            self.q.put(("info", None))
+
+    def _takeover_bg_inner(self):
         token = self.cfg.get_token()
         ip = self.auth.detect_local_ip()
+
+        # 没探测到本机 IP 说明还没连上校园网。
+        # 此时如果继续往下走，会先把别人踢下线，结果自己还上不去网 ——
+        # 属于「没确认就破坏」的行为，必须提前退出。
+        if not ip:
+            self.log("未探测到本机出口 IP，无法抢占——请先连接校园网")
+            self.q.put(("status", ("error", "未连接校园网", ERR_C,
+                                   "请先联网再抢占")))
+            return
 
         # Token 可能已失效（服务端轮换）——先自愈换一个，否则查不到设备
         devices = self.auth.online_devices(token)
         if not devices:
             mobile, pwd = self.cfg.get_account()
             if mobile and pwd:
-                try:
-                    from acclogin import AccountLogin, mask_mobile
-
-                    self.log(f"Token 已失效，用账号 {mask_mobile(mobile)} 重新换取…")
-                    lr = AccountLogin().login(mobile, pwd)
-                    if lr.ok and lr.token:
-                        self.cfg.set_token(lr.token)
-                        token = lr.token
-                        self.log("★ 已换取新 Token，继续抢占")
-                except Exception as exc:
-                    self.log(f"换取 Token 失败: {exc}")
+                new_token = self._auto_login_account()
+                if new_token:
+                    token = new_token
+                    self.log("★ 继续抢占")
 
         try:
             devices = self.auth.online_devices(token)
@@ -1073,7 +1297,6 @@ class App:
         else:
             self.log(f"抢占失败：{res.message}")
             self.q.put(("status", ("error", "抢占失败", ERR_C, "")))
-        self.q.put(("info", None))
 
     def _do_show_devices(self):
         """打开「在线设备」窗口：查看谁在占用名额，一键下线。"""
@@ -1119,20 +1342,45 @@ class App:
         self._refresh_devices()
 
     def _refresh_devices(self):
-        """查询并渲染在线设备列表。"""
+        """刷新在线设备列表。
+
+        ⚠️ 查询是**网络 I/O**，不能在 Tk 主线程里做（会卡住窗口）。
+        这里只负责发起后台请求 + 清空旧列表，真正的渲染在
+        :meth:`_render_devices` 里做。
+        """
+        if not hasattr(self, "_dev_list"):
+            return
+        for w in self._dev_list.winfo_children():
+            w.destroy()
+        tk.Label(self._dev_list, text="查询中…", bg=BG,
+                 fg=TEXT3, font=(FONT, 10)).pack(anchor="w")
+        threading.Thread(target=self._refresh_devices_bg, daemon=True).start()
+
+    def _refresh_devices_bg(self):
+        """后台线程：查在线设备，结果回主线程渲染。"""
+        devices: list = []
+        err = ""
+        try:
+            ip = self.auth.detect_local_ip()
+            token = self.cfg.get_token()
+            devices = self.auth.online_devices(token)
+        except Exception as exc:
+            err = str(exc)
+            ip = ""
+        self.q.put(("devices", (devices, err, ip)))
+
+    def _render_devices(self, devices, err: str = "", ip: str = ""):
+        """渲染在线设备列表（只在主线程调用）。"""
         if not hasattr(self, "_dev_list"):
             return
         for w in self._dev_list.winfo_children():
             w.destroy()
 
-        ip = self.auth.detect_local_ip()
-        token = self.cfg.get_token()
-        devices = []
-        err = ""
-        try:
-            devices = self.auth.online_devices(token)
-        except Exception as exc:
-            err = str(exc)
+        if err:
+            tk.Label(self._dev_list, text=f"查询失败：{err}", bg=BG,
+                     fg=ERR_C, font=(FONT, 10)).pack(anchor="w")
+            self._dev_hint.configure(text="检查网关地址与网络连接后重试。", fg=TEXT3)
+            return
 
         if not devices:
             tk.Label(self._dev_list, text="当前没有设备在线", bg=BG,
@@ -1146,7 +1394,7 @@ class App:
             t = d.get("type")
             kind = {1: "手机 WIFI 使用中", 2: "电脑有线使用中",
                     3: "电脑 WIFI 使用中"}.get(t, "未知设备")
-            mine = dip == ip
+            mine = bool(ip) and dip == ip
 
             row = tk.Frame(self._dev_list, bg=CARD, highlightthickness=1,
                            highlightbackground=BORDER, highlightcolor=BORDER)
@@ -1199,7 +1447,15 @@ class App:
             self.log(f"下线 {ip} 失败：{res.message}")
 
     def _do_logout(self):
-        ip = self.cfg.get("last_ip") or self.auth.detect_local_ip()
+        # 只用**当前**探测到的 IP。
+        # 历史上优先用 last_ip（上次成功认证的 IP），但换网络/校园网重分配地址后
+        # 那个 IP 可能已经属于别人的设备 —— 拿它去 logout 会踢错人。
+        ip = self.auth.detect_local_ip()
+        if not ip:
+            self.log("未探测到本机出口 IP，无法确定要下线哪台设备")
+            self.q.put(("status", ("error", "未探测到本机 IP", ERR_C,
+                                   "请确认已连接校园网")))
+            return
         token = self.cfg.get_token()
         if not token:
             self.log("没有 Token，无法下线")
@@ -1218,10 +1474,15 @@ class App:
     # ------------------------------------------------------------ 扫码窗口
 
     def _open_qr(self):
+        """打开扫码窗口。
+
+        「刷新」按钮调用的是本方法 —— 必须真正**新建一个会话**，
+        而不是把已存在的窗口 lift 起来（那样刷新根本不起作用）。
+        """
+        # 已存在窗口 → 先关掉旧的（含取消后台线程），再开新会话
         if self._qr_win and self._qr_win.winfo_exists():
-            self._qr_win.lift()
-            self._qr_win.focus_force()
-            return
+            self._close_qr()
+
         win = tk.Toplevel(self.root)
         self._qr_win = win
         win.title("扫码登录")
@@ -1249,14 +1510,31 @@ class App:
         Pill(row, "刷新", self._open_qr, height=32, width=88).pack(side="left")
         Pill(row, "关闭", self._close_qr, height=32, width=88).pack(side="left", padx=(10, 0))
 
+        # 取消令牌：关窗口 / 刷新时置位，后台轮询线程据此退出
+        self._qr_cancel = threading.Event()
         threading.Thread(target=self._qr_bg, daemon=True).start()
 
     def _qr_bg(self):
+        try:
+            self._qr_bg_inner()
+        except Exception as exc:
+            self.log(f"扫码流程异常：{exc}")
+            self.q.put(("qrstate", ("failed", f"扫码流程出错：{exc}")))
+        finally:
+            # 无论成功、失败、取消，临时二维码都不留在磁盘上
+            self._cleanup_qr_tmp()
+
+    def _qr_bg_inner(self):
+        cancel = getattr(self, "_qr_cancel", None)
         ip = self.auth.detect_local_ip()
         mac = self.auth.detect_mac()
         assistant = QrAssistant(self.auth, self.log)
         self._qr_assistant = assistant
-        state = assistant.load(ip, mac)
+        try:
+            state = assistant.load(ip, mac)
+        except Exception as exc:
+            self.q.put(("qrstate", ("failed", f"加载扫码页失败：{exc}")))
+            return
         if not state.ready:
             self.q.put(("qrstate", (state.status, state.message)))
             return
@@ -1264,10 +1542,17 @@ class App:
         self.q.put(("qr", png))
         self.q.put(("qrstate", (state.status, state.message)))
 
-        # 轮询
-        for _ in range(90):
-            time.sleep(2)
-            s = assistant.poll(ip, mac)
+        # 轮询时长与二维码 TTL 对齐（TTL = 10 分钟），每 2 秒一次
+        max_polls = (SESSION_TTL_MINUTES * 60) // 2
+        for _ in range(max_polls):
+            if cancel is not None and cancel.wait(timeout=2):
+                # 已被取消（用户关窗/刷新）——立即退出，不再发请求
+                return
+            try:
+                s = assistant.poll(ip, mac)
+            except Exception as exc:
+                self.q.put(("qrstate", ("failed", f"轮询失败：{exc}")))
+                return
             self.q.put(("qrstate", (s.status, s.message)))
             if s.status in ("authorized", "expired"):
                 if s.status == "authorized":
@@ -1283,7 +1568,25 @@ class App:
                             self.log(f"扫码已授权，但 IP 认证未确认：{res.message}")
                     else:
                         self.log("扫码授权成功，设备已上线（未配置 Token）")
+                    # 授权成功后刷新主窗口状态卡
+                    self.q.put(("info", None))
+                self._cleanup_qr_tmp()
                 break
+            if s.status == "expired":
+                self._cleanup_qr_tmp()
+                break
+        else:
+            self.q.put(("qrstate", ("expired", "二维码已过期，请点「刷新」重新生成")))
+
+    @staticmethod
+    def _cleanup_qr_tmp():
+        """清理临时二维码文件（用后即删，不留在磁盘上）。"""
+        try:
+            p = data_dir() / "qr_tmp.png"
+            if p.exists():
+                p.unlink()
+        except Exception:
+            pass
 
     def _render_qr(self, png_path):
         if not png_path or not Path(png_path).exists():
@@ -1307,9 +1610,15 @@ class App:
         self._qr_status.configure(text=message, fg=color)
 
     def _close_qr(self):
+        # 取消后台轮询线程 —— 否则关窗后它还会继续请求、继续写队列
+        ev = getattr(self, "_qr_cancel", None)
+        if ev is not None:
+            ev.set()
         if self._qr_win and self._qr_win.winfo_exists():
             self._qr_win.destroy()
         self._qr_win = None
+        self._qr_assistant = None
+        self._cleanup_qr_tmp()
 
     # ------------------------------------------------------------ 守护
 
@@ -1343,6 +1652,8 @@ class App:
         self.q.put(("info", None))
         self._sync_autostart()
         if self.cfg.has_token():
+            # 只读体检：现在走 onestatus，不会改变在线状态、不占名额。
+            # 即便用户没开自启也不影响 —— 它只是问一句「Token 还活着吗」。
             threading.Thread(target=self._check_token_bg, daemon=True).start()
             if self.cfg.get("autostart"):
                 self.log("开机自启已开启，正在自动认证上线…")
@@ -1678,18 +1989,21 @@ class App:
         sb.pack(side="right", fill="y")
         canvas.configure(yscrollcommand=sb.set)
         body = tk.Frame(canvas, bg=BG)
-        inner = canvas.create_window((0, 0), window=body, anchor="nw")
+        # canvas.create_window() 返回的是**画布项目 id（整数）**，
+        # 不是控件 —— 对它调用 pack() 或当 parent 用都必然 AttributeError。
+        # 因此：画布项目 id 用 _win_item 存，控件引用一律用 body。
+        _win_item = canvas.create_window((0, 0), window=body, anchor="nw")
         body.bind("<Configure>",
                   lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
         canvas.bind("<Configure>",
-                    lambda e: canvas.itemconfigure(inner, width=e.width))
+                    lambda e: canvas.itemconfigure(_win_item, width=e.width))
         for w in (canvas, body):
             w.bind("<MouseWheel>", lambda e: canvas.yview_scroll(
                 int(-1 * (e.delta / 120)), "units"))
             w.bind("<Button-4>", lambda e: canvas.yview_scroll(1, "units"))
             w.bind("<Button-5>", lambda e: canvas.yview_scroll(-1, "units"))
 
-        inner.pack(fill="both", expand=True, padx=24, pady=(14, 10))
+        body.pack(fill="both", expand=True, padx=24, pady=(14, 10))
 
         steps = [
             ("方式一 · 填账号密码（最省事）", ACCENT, [
@@ -1716,11 +2030,11 @@ class App:
             ]),
         ]
         for head, color, lines in steps:
-            tk.Label(inner, text=head, bg=BG, fg=color,
+            tk.Label(body, text=head, bg=BG, fg=color,
                      font=(FONT, 10, "bold"), anchor="w",
                      justify="left").pack(fill="x", pady=(12, 6))
             for ln in lines:
-                tk.Label(inner, text=ln, bg=BG, fg=TEXT2, font=(FONT, 9),
+                tk.Label(body, text=ln, bg=BG, fg=TEXT2, font=(FONT, 9),
                          anchor="w", justify="left").pack(fill="x", pady=1)
 
         foot = tk.Frame(win, bg=BG)
@@ -1750,6 +2064,12 @@ class App:
 
 def main() -> int:
     silent = "--silent" in sys.argv
+
+    # 文件日志（脱敏 + 轮转）—— 初始化失败不影响程序运行
+    try:
+        logs.init(logs_dir())
+    except Exception:
+        pass
 
     # 任务栏占用控制：
     # 1) 独立 AppUserModelID —— 任务栏图标独立分组，不和宿主进程混一起

@@ -23,3 +23,7 @@ config_backup/
 # 签名私钥（绝不入库）
 *.pfx
 pfx-password.txt
+
+# 编译产物与交付包（二进制不入版本库，改由 GitHub Release 附件分发）
+release/
+dist/

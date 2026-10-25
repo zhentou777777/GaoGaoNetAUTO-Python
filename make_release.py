@@ -34,9 +34,9 @@ VERSION = "1.0.0"
 
 # 源码包要带的文件
 SOURCE_FILES = [
-    "main.py", "auth.py", "config.py", "icons.py", "netguard.py",
-    "netprobe_win.py", "qrflow.py", "acclogin.py", "taskbar.py",
-    "requirements.txt", "README.md", "LICENSE",
+    "main.py", "auth.py", "config.py", "vault.py", "logs.py", "icons.py",
+    "netguard.py", "netprobe_win.py", "qrflow.py", "acclogin.py", "taskbar.py",
+    "requirements.txt", "README.md", "CHANGELOG.md", "LICENSE",
     "build_exe.py", "version_info.txt",
     "make_launchers.py", "make_release.py",
 ]

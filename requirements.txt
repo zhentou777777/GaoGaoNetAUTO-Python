@@ -1,7 +1,15 @@
-requests>=2.31.0
-segno>=1.6.0
-pystray>=0.19.5
-Pillow>=10.0.0
+# 运行时依赖 —— 版本已固定，保证构建可复现
+# 验证环境：Python 3.11.0rc2 (Windows x64)
+requests==2.34.2
+segno==1.6.6
+pystray==0.19.5
+Pillow==13.0.0
+
+# 打包工具（固定，避免不同 PyInstaller 产出的特征差异影响误报率）
+PyInstaller==6.22.3
+
+# 测试依赖
+pytest==9.1.1
 
 # 抓取模式 capture.py 需要（可选，仅在需要分析网页流程时安装）：
 #   pip install playwright

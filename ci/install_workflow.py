@@ -53,8 +53,20 @@ def main() -> int:
     if not SRC.exists():
         print(f"✗ 找不到 {SRC}")
         return 1
+
+    # ── 关键：先把源文件复制到 .github/workflows/ ──────────────────
+    # 历史实现只做 `git add ci/build_windows.yml`，
+    # 从没把文件**复制**到 DEST，所以「一键部署」实际什么也没部署，
+    # GitHub Actions 页自然一直是空的。
+    dest = ROOT / DEST
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(SRC, dest)
+    print(f"✓ 已复制 {SRC.name} → {dest}")
+
     if not shutil.which("gh"):
-        print("✗ 需要 GitHub CLI：https://cli.github.com")
+        print("! 未安装 GitHub CLI，无法自动推送。")
+        print(f"  请手动执行：git add {DEST} && git commit -m 'ci: add workflow' "
+              f"&& git push origin main")
         return 1
 
     if _has_workflow_scope():
@@ -73,8 +85,10 @@ def main() -> int:
             return 2
 
     # 授权已就位 → 正常推送
-    res = _run(["git", "add", str(SRC), str(DEST.parent)])
+    _run(["git", "add", str(DEST)])
     res = _run(["git", "commit", "-m", "ci: 添加 Windows exe 自动构建 workflow"])
+    if res.returncode != 0:
+        print("! 没有需要提交的改动（可能已部署）")
     res = _run(["git", "push", "origin", "main"])
     if res.returncode == 0:
         print("✓ workflow 已部署，可在 Actions 页查看构建")

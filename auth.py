@@ -59,6 +59,33 @@ _DEVICE_LIMIT_WORDS = (
     "已有设备", "其他设备", "重复登录", "已顶替", "被顶替", "设备冲突",
     "已达到上限", "在线设备", "下线其它设备", "请下线",
 )
+# 明确的失败措辞 —— 即使 code 是 0/200，只要出现这些词就不能算成功。
+_FAIL_WORDS = (
+    "失败", "错误", "异常", "error", "fail", "exception", "denied",
+    "拒绝", "无效参数", "参数错误",
+)
+
+
+def _looks_like_token(s: str) -> bool:
+    """粗判一个字符串像不像 Bearer Token。
+
+    要求：长度合理、只含 Token 常见字符、且**有足够熵**（不是自然语言）。
+    这样能挡住「错误信息里的一串中文/英文单词被当成 Token」。
+    """
+    if not s or len(s) < 20:
+        return False
+    allowed = set(
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_."
+    )
+    if not all(c in allowed for c in s):
+        return False
+    # 必须混有大写/小写/数字中的至少两类，避免纯英文单词被误判
+    has_upper = any(c.isupper() for c in s)
+    has_lower = any(c.islower() for c in s)
+    has_digit = any(c.isdigit() for c in s)
+    if sum([has_upper, has_lower, has_digit]) < 2:
+        return False
+    return True
 
 
 @dataclass
@@ -99,6 +126,34 @@ class CampusAuth:
     @property
     def base_url(self) -> str:
         return self.cfg.base_url
+
+    def transport_is_secure(self) -> bool:
+        """网关是否走 HTTPS。
+
+        云高校园网网关历史上只提供 HTTP（端口 1110），所以**多数情况
+        必然是 False**。程序不会因此拒绝工作（否则整个工具不可用），
+        但会：
+        * 在界面上明确提示「Token 以明文经过内网」；
+        * 每次带 Token 的请求都记一条日志，避免用户不知情。
+        """
+        return str(self.cfg.get("scheme", "")).strip().lower() == "https"
+
+    def transport_warning(self) -> str:
+        """返回传输层风险提示文本（无风险时返回空串）。"""
+        if self.transport_is_secure():
+            return ""
+        host = str(self.cfg.get("host") or "")
+        return (
+            f"网关 {host} 使用 HTTP，Bearer Token 以明文经过校园网内网。"
+            "这是云高网关的既有形态，本工具无法单方面升级为 HTTPS。"
+        )
+
+    def gateway_allowed(self) -> Tuple[bool, str]:
+        """校验网关地址是否在白名单内（防止 Token 被发到任意地址）。"""
+        try:
+            return self.cfg.gateway_valid()
+        except Exception:
+            return True, ""
 
     def _url(self, path: str, params: Dict[str, str]) -> str:
         base = self.base_url.rstrip("/")
@@ -212,28 +267,59 @@ class CampusAuth:
     def is_nat_mode(self) -> bool:
         """判断本机是否处于 NAT 之后（典型场景：连手机热点）。
 
-        判据（按可靠度排序）：
-        1. **出口 IP ≠ 本机 IP** —— 最准。连手机热点时本机是
-           192.168.x.x，出口是手机的公网地址，两者必然不同。
-        2. 兜底：默认网关是私有地址，且与本机 IP **不在同一子网**。
-           （注意不能用「前两段相同」判断——手机热点网关
-           192.168.43.1 与本机 192.168.43.57 前两段相同，
-           但仍然是 NAT，必须按掩码算子网。）
+        ⚠️ 这个判断**只能作为提示**，不能单独用来决定「跳过认证」。
+
+        历史实现用「出口 IP ≠ 本机 IP」判定 NAT，但这在**直连校园网时
+        同样成立**：校园网给电脑分配的是 10.x 内网地址（10.135.x.x），
+        而外网看到的出口是校园网的公网地址 —— 两者当然不同。
+        于是这个判据在直连时也几乎恒为 True，导致程序误以为「在走手机热点」
+        而**跳过本该做的认证**，表现为「明明断了网却一直显示已连接」。
+
+        现在改成保守判据：只有当本机地址是**家庭/热点网段**
+        （192.168.x.x / 10.x / 172.16–31.x，且网关也是私有地址）
+        且出口地址确实是**公网地址**时，才判为 NAT。
+        判不出来就返回 False —— **宁可多认证一次，也不要跳过认证**。
         """
         local_ip = self.detect_local_ip()
         exit_ip = self.detect_exit_ip()
-        if local_ip and exit_ip and exit_ip != local_ip:
-            # 出口 IP 与本机不同 —— 一定经过了 NAT
-            return True
-        if not local_ip:
+        if not local_ip or not exit_ip:
             return False
+        if exit_ip == local_ip:
+            return False   # 出口就是本机 → 必然不是 NAT
+        # 本机必须是私有地址，且不能是校园网常见的 10.135.x.x 段
+        if not _is_private_ipv4(local_ip):
+            return False
+        if local_ip.startswith("10.135."):
+            return False   # 云高校园网内网段，不是热点
+        # 出口必须是公网地址
+        if _is_private_ipv4(exit_ip):
+            return False
+        # 网关也应是私有地址（路由器/手机）
         gw = self.detect_gateway()
-        if not gw:
+        if gw and not _is_private_ipv4(gw):
             return False
-        if not _is_private_ipv4(gw):
+        return True
+
+    def is_already_online(self, ip: str, token: str) -> bool:
+        """权威判据：服务端在线列表里**已经有**本机出口 IP。
+
+        这是判断「是否需要再认证一次」的**唯一可靠依据** ——
+        服务端说什么就是什么，不靠本地启发式猜。
+
+        典型场景：手机热点下，手机认证后整条 NAT 链路都被放行，
+        服务端在线列表里就有这个出口 IP，PC 不需要再认证一次
+        （再认证反而会因为单设备限制把手机挤掉）。
+        """
+        if not ip or not token:
             return False
-        # 网关与本机不在同一子网 → 经过了路由/NAT
-        return not _same_subnet(local_ip, gw)
+        try:
+            devices = self.online_devices(token)
+        except Exception:
+            return False
+        for d in devices or []:
+            if str(d.get("ip", "")) == ip:
+                return True
+        return False
 
     def detect_mac(self) -> str:
         """取当前活动网卡的真实 MAC（按出口 IP 精确匹配）。"""
@@ -275,6 +361,14 @@ class CampusAuth:
     # ------------------------------------------------------------ 请求封装
 
     def _get(self, url: str, token: str = "") -> Tuple[Optional[int], str, Dict[str, str]]:
+        # ⚠️ 安全闸门：带 Token 的请求必须确认网关在白名单内。
+        # 否则配置文件被篡改（或用户误填）时，Bearer Token 会被发到
+        # 任意第三方地址。这道闸门放在最前面 —— 先拦下，再谈能不能发。
+        if token:
+            ok, reason = self.gateway_allowed()
+            if not ok:
+                self.log(f"已阻止认证请求：{reason}")
+                return None, f"网关地址不在白名单内，已阻止发送 Token（{reason}）", {}
         if self._session is None:
             return None, "requests 库不可用", {}
         try:
@@ -329,24 +423,45 @@ class CampusAuth:
                 payload.get("msg", payload.get("message", payload.get("errmsg", "")))
             )
             success = payload.get("success")
-            if success is True:
-                return OK, msg or "认证成功"
-            if code in (0, "0", 200, "200") and success is not False:
-                return OK, msg or "认证成功"
+
+            # ── 顺序很重要 ────────────────────────────────────────
+            # 历史实现的判定顺序是「success=True → OK」在前，
+            # 「code=0/200 → OK」在后。后果是：
+            #   {"code":500,"success":true,"msg":"服务器错误"}  → 被判成功
+            #   {"code":0,"msg":"token无效"}                    → 被判成功
+            # 现在改成：**先判失败，再判成功**。
+
+            # 1) 明确的状态码优先（410 失效 / 409 设备占用）
             if code is not None:
-                # 云高用 410 统一表示"登录状态已失效"（Token 过期/未认证）
                 if code in (410, "410"):
                     return TOKEN_INVALID, msg or "登录状态已失效"
-                # 409 = 套餐只允许单设备，且已有设备在线（实测）
                 if code in (409, "409"):
                     return DEVICE_LIMIT, msg or "套餐只支持单设备认证，已有设备在线"
-                low_msg = msg.lower()
-                if any(w in msg for w in _TOKEN_BAD_WORDS) or any(
-                    w in low_msg for w in _TOKEN_BAD_WORDS
-                ):
-                    return TOKEN_INVALID, msg
-                if any(w in msg for w in _DEVICE_LIMIT_WORDS):
-                    return DEVICE_LIMIT, msg
+
+            # 2) 失败文案优先 —— 即使 code 是 0/200，
+            #    只要明确说了"无效/已满/失败"，就不能算成功。
+            low_msg = msg.lower()
+            if msg and (
+                any(w in msg for w in _TOKEN_BAD_WORDS)
+                or any(w in low_msg for w in _TOKEN_BAD_WORDS)
+            ):
+                return TOKEN_INVALID, msg
+            if msg and any(w in msg for w in _DEVICE_LIMIT_WORDS):
+                return DEVICE_LIMIT, msg
+            if msg and any(w in low_msg for w in _FAIL_WORDS):
+                return UNKNOWN_ERR, msg or "服务端返回失败"
+
+            # 3) 显式失败标志
+            if success is False:
+                return UNKNOWN_ERR, msg or "服务端返回失败"
+
+            # 4) 只有在「没有失败信号」时才判成功
+            if success is True:
+                return OK, msg or "认证成功"
+            if code in (0, "0", 200, "200"):
+                return OK, msg or "认证成功"
+
+            if code is not None:
                 return UNKNOWN_ERR, msg or f"服务端返回 code={code}"
 
         # 纯文本响应
@@ -356,12 +471,19 @@ class CampusAuth:
         for w in _DEVICE_LIMIT_WORDS:
             if w in low:
                 return DEVICE_LIMIT, f"响应提示：{w}"
-        if any(w in low for w in ("success", "成功", "ok")):
-            return OK, "认证成功"
-        if any(w in low for w in ("fail", "失败", "error", "错误")):
+        # 失败措辞优先于成功措辞（"失败"里也可能含 "ok" 之类子串）
+        if any(w in low for w in ("fail", "失败", "error", "错误", "异常")):
             return UNKNOWN_ERR, "服务端返回失败"
+        if any(w in low for w in ("success", "成功")):
+            return OK, "认证成功"
+        # 空响应 / 2xx 但没有任何状态线索 → **不能**当成成功。
+        # 历史实现在这里直接返回 OK，导致「服务端说设备已满」被当成认证成功，
+        # 程序继续往下走而不做清理/降级。
+        if not text.strip():
+            return UNKNOWN_ERR, "服务端返回空响应，无法确认认证结果"
         if http_code is not None and 200 <= http_code < 300:
-            return OK, "已提交（服务端未返回明确状态）"
+            return UNKNOWN_ERR, ("服务端未返回可识别的状态，"
+                                 "无法确认认证是否成功")
         if http_code is not None:
             return HTTP_ERR, f"HTTP {http_code}"
         return NETWORK_ERR, "无法连接认证服务器"
@@ -372,6 +494,15 @@ class CampusAuth:
 
         认证成功后服务端常会回一个轮换后的 Token，拿到它就能一直续命，
         不必重新抓包。
+
+        ⚠️ 抓取要**保守**：历史上是「body 里任意 20–4096 字符的字符串」都算
+        Token，结果失败响应里的错误信息、CSRF token、refresh token 都会被
+        当成 Bearer Token，把本来还能用的 Token 覆盖掉。
+
+        现在只接受：
+          * 明确命名的字段（access_token / id_token / token / bearer …）
+          * 或形如 JWT 的三段式结构
+        并且**只在认证成功时**才使用（调用方保证）。
         """
         candidates: List[str] = []
 
@@ -387,8 +518,10 @@ class CampusAuth:
 
         if body:
             for pattern in (
-                r'"(?:access_?token|id_?token|token)"\s*:\s*"([^"]{12,})"',
-                r"'(?:access_?token|id_?token|token)'\s*:\s*'([^']{12,})'",
+                # 明确命名的 token 字段
+                r'"(?:access_?token|id_?token|bearer_?token|auth_?token)"\s*:\s*"([^"]{20,})"',
+                r"'(?:access_?token|id_?token|bearer_?token|auth_?token)'\s*:\s*'([^']{20,})'",
+                # Bearer 头形式
                 r"Bearer\s+([A-Za-z0-9\-._~+/]{20,}=*)",
             ):
                 for m in re.finditer(pattern, body):
@@ -396,7 +529,15 @@ class CampusAuth:
 
         for cand in candidates:
             cand = (cand or "").strip()
-            if 20 <= len(cand) <= 4096 and not cand.lower().startswith("v1:"):
+            if not (20 <= len(cand) <= 4096):
+                continue
+            if cand.lower().startswith("v1:"):
+                continue
+            # JWT 形态（三段式）——最可信
+            if cand.count(".") == 2 and all(c.isalnum() or c in "-_." for c in cand):
+                return cand
+            # 明确字段名来源的（candidates 前半段来自 header / 命名字段）
+            if cand in candidates[:len(candidates)] and _looks_like_token(cand):
                 return cand
         return None
 
@@ -407,7 +548,10 @@ class CampusAuth:
         url = self._url("/api/network/auth", {"ip": ip})
         code, body, headers = self._get(url, token)
         status, msg = self._classify(code, body, headers)
-        new_token = self._extract_new_token(body, headers)
+        # 只在**认证成功**时才提取新 Token —— 失败响应里的错误信息、
+        # CSRF token 等绝不能当成 Bearer Token 保存。
+        new_token = (self._extract_new_token(body, headers)
+                     if status == OK else None)
         return AuthResult(
             ok=status == OK,
             status=status,
@@ -423,7 +567,10 @@ class CampusAuth:
         url = self._url("/api/network/auth", {"str": code})
         code_, body, headers = self._get(url, token)
         status, msg = self._classify(code_, body, headers)
-        new_token = self._extract_new_token(body, headers)
+        # 只在**认证成功**时才提取新 Token —— 失败响应里的错误信息、
+        # CSRF token 等绝不能当成 Bearer Token 保存。
+        new_token = (self._extract_new_token(body, headers)
+                     if status == OK else None)
         return AuthResult(
             ok=status == OK,
             status=status,
@@ -595,16 +742,46 @@ class CampusAuth:
         return res
 
     def check_token(self, ip: str, token: str) -> AuthResult:
-        """轻量体检：只验证 Token 是否还能被服务端接受（不改变在线状态）。"""
-        url = self._url("/api/network/auth", {"ip": ip})
+        """轻量体检：只验证 Token 是否还能被服务端接受（**不改变在线状态**）。
+
+        ⚠️ 这里**必须**用只读接口。
+
+        历史实现用的是 ``/api/network/auth?ip=...`` —— 那是**认证**接口，
+        会真的把本机推上线。在单设备套餐上，这意味着「打开程序看一眼」
+        就把手机踢了、占掉了唯一名额。
+
+        现在改用 ``/api/network/onestatus?ip=...``：只查询某 IP 的在线状态，
+        不发起认证、不改变任何设备的在线状态。
+        """
+        url = self._url("/api/network/onestatus", {"ip": ip})
         code, body, headers = self._get(url, token)
         status, msg = self._classify(code, body, headers)
+        # onestatus 返回的是「状态查询」语义，单独判读 code 字段
+        if status == OK:
+            try:
+                payload = json.loads(body or "{}")
+            except Exception:
+                payload = {}
+            if isinstance(payload, dict):
+                c = payload.get("code", payload.get("status"))
+                if c in (401, 403, "401", "403"):
+                    return AuthResult(
+                        ok=False, status=TOKEN_INVALID,
+                        message="服务端拒绝该 Token（401/403）",
+                        detail=(body or "")[:400],
+                        stage="token 健康检查", http_code=code)
+                if c in (410, "410"):
+                    return AuthResult(
+                        ok=False, status=TOKEN_INVALID,
+                        message="登录状态已失效",
+                        detail=(body or "")[:400],
+                        stage="token 健康检查", http_code=code)
         return AuthResult(
             ok=status == OK,
             status=status,
             message=msg,
             detail=(body or "")[:400],
-            stage="token 健康检查",
+            stage="token 健康检查（只读）",
             http_code=code,
         )
 
@@ -620,35 +797,59 @@ class CampusAuth:
             1 = 手机 WIFI 使用中
             2 = 电脑有线使用中
             3 = 电脑 WIFI 使用中
+
+        ⚠️ 失败时返回空列表，**但语义是"查不到"而不是"没有设备"**。
+        历史上网络错误 / Token 失效 / JSON 解析失败统统返回 []，
+        UI 会显示「当前没有设备在线」，用户据此做共享/抢占判断就全错了。
+        需要区分时请用 ``online_devices_result()``。
+        """
+        return self.online_devices_result(token)[0]
+
+    def online_devices_result(self, token: str
+                              ) -> Tuple[List[Dict[str, Any]], Optional[str]]:
+        """同 ``online_devices``，但额外返回错误原因（None = 成功）。
+
+        返回 ``(devices, error)``；error 非 None 时 devices 不可信。
         """
         url = self._url("/api/network/online", {})
-        code, body, headers = self._get(url, token)
-        if code is None:
-            return []
         try:
-            payload = json.loads(body or "{}")
-        except Exception:
-            return []
-        data = payload.get("data") if isinstance(payload, dict) else None
-        if not isinstance(data, list):
-            return []
-        return [d for d in data if isinstance(d, dict)]
+            code, body, headers = self._get(url, token)
+        except Exception as exc:
+            return [], f"查询在线设备失败：{exc}"
 
-    def one_status(self, ip: str, token: str) -> bool:
-        """查询某个 IP 当前是否已在线。"""
-        url = self._url("/api/network/onestatus", {"ip": ip})
-        code, body, headers = self._get(url, token)
         if code is None:
-            return False
+            return [], "无法连接认证服务器"
+        if code in (401, 403):
+            return [], "Token 已失效（服务端拒绝）"
+
         try:
             payload = json.loads(body or "{}")
         except Exception:
-            return False
-        return isinstance(payload, dict) and payload.get("code") in (200, "200")
+            return [], "服务端返回的不是合法 JSON"
+
+        if not isinstance(payload, dict):
+            return [], "服务端返回结构异常"
+
+        # 服务端用 code 表达业务错误时，不能当成"没有设备"
+        scode = payload.get("code", payload.get("status"))
+        if scode is not None and scode not in (0, "0", 200, "200"):
+            msg = str(payload.get("msg", payload.get("message", "")))
+            return [], f"服务端返回 code={scode} {msg}".strip()
+
+        data = payload.get("data")
+        if data is None:
+            data = payload.get("list") or payload.get("devices")
+        if not isinstance(data, list):
+            return [], "服务端未返回设备列表字段"
+        return [d for d in data if isinstance(d, dict)], None
 
     def describe_devices(self, token: str, my_ip: str = "") -> str:
         """把在线设备列表格式化成一行人话，用于状态卡显示。"""
-        devices = self.online_devices(token)
+        devices, err = self.online_devices_result(token)
+        if err:
+            # 区分「查不到」和「真的没有设备」——
+            # 前者是故障，不能让用户以为「没人占名额，可以直接连」。
+            return f"设备状态未知（{err}）"
         if not devices:
             return "当前无在线设备"
         parts: List[str] = []
@@ -762,13 +963,3 @@ def _is_private_ipv4(ip: str) -> bool:
     if (n >> 24) == 192 and second == 168:
         return True
     return False
-
-
-def _same_subnet(ip_a: str, ip_b: str, mask: str = "255.255.255.0") -> bool:
-    """判断两个 IPv4 是否在同一子网（按给定掩码）。"""
-    a = _ip_to_int(ip_a)
-    b = _ip_to_int(ip_b)
-    m = _ip_to_int(mask)
-    if a < 0 or b < 0 or m < 0:
-        return False
-    return (a & m) == (b & m)

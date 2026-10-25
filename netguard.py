@@ -25,6 +25,20 @@ STATE_ONLINE = "online"
 STATE_OFFLINE = "offline"
 STATE_UNKNOWN = "unknown"
 
+# 连通性探测目标：HTTPS + **带预期内容**。
+#
+# 为什么不能只做 TCP connect：很多环境（校园网未认证时的「重定向门户」、
+# 企业代理、防火墙的 SYN-ACK 响应）会让 TCP 握手成功，但**根本没有真的上网**。
+# 只看 TCP 会把「连上了但拿不到任何内容」误判成已联网，
+# 于是程序以为网络正常，**永远不去触发重新认证**。
+#
+# 现在要求：拿回 200 状态码，且响应体里出现预期特征串。
+_PROBE_TARGETS = [
+    ("https://connectivitycheck.gstatic.com/generate_204", "204"),
+    ("https://www.msftconnecttest.com/connecttest.txt", "Microsoft Connect Test"),
+    ("https://captive.apple.com/hotspot-detect.html", "Success"),
+]
+
 
 @dataclass
 class GuardEvent:
@@ -33,9 +47,42 @@ class GuardEvent:
     ip: str = ""
 
 
-def probe_online(timeout: float = 1.2) -> bool:
-    """TCP 探测外网连通性。"""
-    for host, port in _PROBE_TARGETS:
+def probe_online(timeout: float = 3.0) -> bool:
+    """探测外网连通性。
+
+    判据是**拿到预期的响应内容**，而不是「TCP 握手成功」。
+    原因见 :data:`_PROBE_TARGETS` 的注释：未认证的校园网会接受 TCP
+    连接但把 HTTP 请求重定向到登录门户，只看握手会把「没网」误判成「有网」，
+    程序就永远不去重认证。
+
+    判定不了（DNS 解析失败、证书问题、全部超时）时返回 False ——
+    宁可多触发一次重认证，也不要在断网时假装正常。
+    """
+    try:
+        import requests
+    except Exception:
+        requests = None  # type: ignore
+
+    if requests is not None:
+        for url, expect in _PROBE_TARGETS:
+            try:
+                resp = requests.get(url, timeout=timeout,
+                                    allow_redirects=False,
+                                    headers={"User-Agent": "Mozilla/5.0"})
+                # 302/301 说明被门户劫持 → 不算联网
+                if resp.status_code in (301, 302, 303, 307, 308):
+                    continue
+                if resp.status_code != 200:
+                    continue
+                body = resp.text or ""
+                if expect.lower() in body.lower():
+                    return True
+            except Exception:
+                continue
+        return False
+
+    # 没有 requests 时退回 TCP 探测（弱一些，但总比不探测强）
+    for host, port in (("223.5.5.5", 53), ("1.1.1.1", 443)):
         try:
             with socket.create_connection((host, port), timeout=timeout):
                 return True
@@ -113,7 +160,11 @@ class NetGuard:
     def _tick(self) -> None:
         ip = ""
         try:
-            ip = self.auth.detect_local_ip()
+            # ⚠️ 必须盯**出口 IP**，不是本机网卡地址。
+            # 云高把授权绑在出口 IP 上：手机热点下本机是 192.168.x.x，
+            # 但云高认的是手机的公网地址。盯本机 IP 在热点场景下
+            # 永远不变，校园网重分配地址时反而可能误判。
+            ip = self.auth.detect_exit_ip() or self.auth.detect_local_ip()
         except Exception:
             ip = ""
 

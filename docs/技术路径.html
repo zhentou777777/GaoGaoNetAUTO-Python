@@ -289,8 +289,9 @@ GET /api/login → 405 {&quot;message&quot;:&quot;The GET method is not supporte
 {&quot;account&quot;:..., &quot;pwd&quot;:...}
 
 # 3. 命中
-{&quot;mobile&quot;: &quot;13800138000&quot;, &quot;password&quot;: &quot;x&quot;}
+{&quot;mobile&quot;: &quot;138****8000&quot;, &quot;password&quot;: &quot;x&quot;}
 → {&quot;code&quot;:408,&quot;msg&quot;:&quot;手机号不合法&quot;}     ← 字段被识别了！</code></pre>
+<blockquote><p>文档里的手机号一律写成 <code>138****8000</code> 这种掩码形式 ——</p><p>文档会随安装包分发给很多人，完整号码可能被当成真实用户信息。</p></blockquote>
 <p><strong>最终接口</strong>：</p>
 <pre><code>POST https://user.v4.yungao-tech.com/api/login
 Content-Type: application/json

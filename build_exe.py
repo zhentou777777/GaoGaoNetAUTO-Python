@@ -216,7 +216,16 @@ def main() -> int:
 
     dist = HERE / "dist"
     if not args.skip_audit:
-        audit(dist)
+        # ⚠️ 审计失败必须让构建失败。
+        # 历史实现忽略了返回值，本地构建命中高危项也能"成功"退出，
+        # 门禁形同虚设。
+        arc = audit(dist)
+        if arc != 0:
+            print()
+            print(f"✗ 产物审计未通过（退出码 {arc}）—— 已中止发布。")
+            print("  请按上面的提示处理后重新构建；")
+            print("  确实需要跳过请显式加 --skip-audit。")
+            return arc
 
     if args.sign:
         return sign(dist)

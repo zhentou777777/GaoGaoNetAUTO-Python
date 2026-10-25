@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 import json
+import re
 import sys
 import time
 from pathlib import Path
@@ -27,6 +28,39 @@ OUT_JSON = Path(__file__).resolve().parent / "capture.json"
 OUT_LOG = Path(__file__).resolve().parent / "capture.log"
 
 INTEREST = ("/api/", "network", "auth", "login", "qr", "code", "user")
+
+# Authorization 头里的凭据**只留指纹，不留原文**。
+# capture.json 是要发给人看的，写进完整 Bearer Token 等于把
+# 可直接复用的凭据贴到聊天窗口/工单系统里。
+def _auth_fingerprint(value: str) -> str:
+    """把 Authorization 头压成「存在 + 长度 + 末 4 位」。
+
+    例：``Bearer eyJhbGci…9Xq2`` → ``present len=96 tail=9Xq2``
+    """
+    if not value:
+        return ""
+    scheme, _, cred = value.partition(" ")
+    cred = cred or value
+    tail = cred[-4:] if len(cred) >= 4 else ""
+    return f"{scheme or 'raw'} present len={len(cred)} tail={tail}"
+
+
+def _redact(text: str) -> str:
+    """把响应体里像 Token 的片段替换成掩码。
+
+    抓取结果会被人转发/贴进工单，明文 Token 泄露风险很高。
+    只处理**明确长得像 Token** 的长串，不影响分析接口结构。
+    """
+    if not text:
+        return ""
+    result = text
+    for tok in set(re.findall(r"[A-Za-z0-9_\-.]{20,}", text)):
+        has_upper = any(c.isupper() for c in tok)
+        has_lower = any(c.islower() for c in tok)
+        has_digit = any(c.isdigit() for c in tok)
+        if sum([has_upper, has_lower, has_digit]) >= 2:
+            result = result.replace(tok, f"{tok[:6]}***REDACTED***{tok[-4:]}")
+    return result
 
 
 def _now() -> str:
@@ -81,6 +115,7 @@ def main() -> int:
         def on_request(req):
             try:
                 headers = {k.lower(): v for k, v in req.headers.items()}
+                auth = headers.get("authorization", "")
                 records.append(
                     {
                         "t": _now(),
@@ -88,7 +123,8 @@ def main() -> int:
                         "method": req.method,
                         "url": req.url,
                         "has_auth": "authorization" in headers,
-                        "authorization": headers.get("authorization", ""),
+                        # 只记指纹，不记原文（见 _auth_fingerprint）
+                        "authorization": _auth_fingerprint(auth),
                         "post_data": (req.post_data or "")[:2000],
                         "resource_type": req.resource_type,
                     }
@@ -110,7 +146,7 @@ def main() -> int:
                         "kind": "response",
                         "status": resp.status,
                         "url": resp.url,
-                        "body": body[:4000],
+                        "body": _redact(body)[:4000],
                     }
                 )
             except Exception:
@@ -153,6 +189,27 @@ def main() -> int:
         ),
         encoding="utf-8",
     )
+    # Cookie 也可能含会话凭据 —— 落盘前统一压成指纹
+    try:
+        safe_cookies = [
+            {
+                "name": c.get("name"),
+                "value": _auth_fingerprint(str(c.get("value") or "")),
+                "domain": c.get("domain"),
+            }
+            for c in cookies
+        ]
+        OUT_JSON.write_text(
+            json.dumps(
+                {"target": target, "page_vars": js, "cookies": safe_cookies,
+                 "records": records},
+                ensure_ascii=False,
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+    except Exception:
+        pass
 
     # -------------------------------------------------- 生成人读摘要
     lines.append("目标页面: " + target)
@@ -187,7 +244,10 @@ def main() -> int:
     lines.append("")
     lines.append("== Cookie ==")
     for c in cookies:
-        lines.append(f"{c.get('name')} = {c.get('value')}  (domain={c.get('domain')})")
+        val = str(c.get("value") or "")
+        # Cookie 值常常就是会话凭据，同样只留指纹
+        shown = _auth_fingerprint(val) if val else ""
+        lines.append(f"{c.get('name')} = {shown}  (domain={c.get('domain')})")
 
     OUT_LOG.write_text("\n".join(lines), encoding="utf-8")
 

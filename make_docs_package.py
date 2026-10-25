@@ -41,6 +41,7 @@ FILES = [
     ("04-项目说明.html", DOCS / "README.html"),
     ("06-Defender误报排查.md", DOCS / "Defender-误报排查.md"),
     ("06-Defender误报排查.html", DOCS / "Defender-误报排查.html"),
+    ("07-CHANGELOG.md", HERE / "CHANGELOG.md"),
     ("LICENSE", HERE / "LICENSE"),
 ]
 
@@ -85,6 +86,7 @@ INDEX_MD = """# 糕糕校园网自动认证 · 文档包
 | `04-项目说明.md` / `.html` | 项目总览、原理速览、快速开始、FAQ |
 | `05-构建与发布说明.md` | 打包命令与参数、签名流程、CI 配置、发布清单 |
 | `06-Defender误报排查.md` / `.html` | 被杀毒软件拦截的成因、处置步骤、证书信任、彻底根治方案 |
+| `07-CHANGELOG.md` | 版本变更记录（v1.0.0 的安全 / 可靠性 / 工程化改动明细） |
 | `LICENSE` | GPL-2.0 |
 | `MANIFEST.txt` | 本包所有文件的路径、字节数、MD5 |
 

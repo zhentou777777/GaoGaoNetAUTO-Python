@@ -46,22 +46,33 @@ Defender 的 **Download Protection（下载保护）** 会扫描压缩包内的�
 
 ### 2.2 处置
 
-**方案 1（推荐）：白名单 —— 把文件加进排除项**
+**方案 1（推荐）：点「更多信息」→「仍要运行」**
 
-以管理员身份打开 PowerShell：
+这是**最安全**也最省事的做法：只放行这一个文件，不改变系统的整体防护。
+SmartScreen/Defender 记住这个哈希后，同一个文件再运行就不会再拦。
+
+**方案 2：只排除这一个文件（不排除整个目录）**
+
+如果每次运行都被拦，可以用 Defender 的**文件级排除**。注意用
+`Add-MpPreference -ExclusionPath` 排除的是**路径**，粒度最粗是目录；
+想更精确就排除具体文件：
 
 ```powershell
-# 排除整个下载目录（把路径换成你实际放文件的地方）
-Add-MpPreference -ExclusionPath "D:\Downloads"
-
-# 或者只排除这一个文件
-Add-MpPreference -ExclusionPath "D:\Downloads\GaoGaoNetAUTO-文档包-v1.0.0.zip"
+# 管理员 PowerShell —— 只排除这一个 zip / exe，不要排除整个下载目录
+Add-MpPreference -ExclusionPath "D:\Downloads\GaoGaoNetAUTO-v1.0.0-免安装.zip"
 
 # 确认已生效
 Get-MpPreference | Select-Object -ExpandProperty ExclusionPath
 ```
 
-**方案 2：临时关闭实时保护**
+> ⚠️ **不要排除整个磁盘或整个下载目录** —— 那等于给这一整块地方开了免检区，
+> 任何落进去的可执行文件都不再被检查。**排除范围越窄越好**，
+> 理想情况是排除这一个具体文件。
+>
+> ❌ `Add-MpPreference -ExclusionPath "D:\Downloads"`   ← 范围过大，不推荐
+> ✅ `Add-MpPreference -ExclusionPath "D:\Downloads\GaoGaoNetAUTO-v1.0.0-免安装.zip"`  ← 精确到文件
+
+**方案 3：临时关闭实时保护（仅限你完全确认来源时）**
 
 ```powershell
 Set-MpPreference -DisableRealtimeMonitoring $true
@@ -71,7 +82,7 @@ Set-MpPreference -DisableRealtimeMonitoring $false
 
 > ⚠️ 关闭期间不要用其他不认识的程序。这是临时手段，不是解决方案。
 
-**方案 3：让下载方加签名**
+**方案 4（长期正解）：让下载方加签名**
 用 Azure Trusted Signing 签的包，Defender 不会在下载阶段拦。长期方案见 §6。
 
 ### 2.3 顺手检查：MOTW（Mark of the Web）
@@ -98,9 +109,11 @@ Get-Item "D:\Downloads\GaoGaoNetAUTO-文档包-v1.0.0.zip" -Stream *   # 确认�
 **② 本机永久放行：**
 
 ```powershell
-# 管理员 PowerShell
-Add-MpPreference -ExclusionPath "D:\Tools\GaoGaoNetAUTO"
+# 管理员 PowerShell —— 精确到 exe 文件
+Add-MpPreference -ExclusionPath "D:\Tools\GaoGaoNetAUTO\GaoGaoNetAUTO.exe"
 ```
+
+> ❌ 不要写 `-ExclusionPath "D:\Tools\GaoGaoNetAUTO"`（整目录）——那等于给整个目录开免检，范围过大。
 
 **③ 解除 MOTW 后再运行**（如果是复制/解压出来的文件）
 
@@ -161,33 +174,50 @@ powershell -ExecutionPolicy Bypass -File tools\sign_release.ps1 `
 
 > 时间戳很重要：没有它，证书 3 年到期后签名直接失效，装到别人机器上照样报「签名无效」。
 
-### 4.2 目标机导入证书（管理员 PowerShell）
+### 4.2 目标机是否需要导入证书？
 
-```powershell
-Import-Certificate -FilePath ".\GaoGaoNetAUTO-sign.cer" -CertStoreLocation Cert:\LocalMachine\Root
-Import-Certificate -FilePath ".\GaoGaoNetAUTO-sign.cer" -CertStoreLocation Cert:\LocalMachine\TrustedPublisher
-```
+**默认不需要导入。**
 
-导入后：
+自签名证书导入到**受信任的根证书存储**（`Cert:\LocalMachine\Root`）意味着
+「这台机器从此信任这个签发者签的一切东西」—— 这是一个**权限很大的动作**，
+而且会让签名者私钥的安全性直接等同于整台机器的安全性。
+对于一个内部工具，**收益（少一次「未知发布者」提示）远小于风险**。
 
-```powershell
-Get-AuthenticodeSignature ".\GaoGaoNetAUTO.exe" | Format-List Status,SignerCertificate
-# Status 应为 Valid
-```
+推荐做法：
+
+1. **直接点「更多信息」→「仍要运行」**。自签名的意义只是让签名状态显示为
+   `Valid`（而不是 `NotSigned`），本身不能替代受信任证书。
+2. 如果目标机确实需要免除提示，**优先导入到「受信任的发布者」**
+   （`TrustedPublisher`）—— 它只影响发布者身份判定，
+   **不会让该签发者变成可以签发任何证书的根**：
+
+   ```powershell
+   # 管理员 PowerShell
+   Import-Certificate -FilePath ".\GaoGaoNetAUTO-sign.cer" `
+       -CertStoreLocation Cert:\LocalMachine\TrustedPublisher
+   ```
+
+   > ❌ **不建议**导入到 `Cert:\LocalMachine\Root`（受信任的根）。
+   > 只有在你能完全控制该签发者私钥、且有明确的内部信任链时才这么做。
+
+   导入后检查：
+
+   ```powershell
+   Get-AuthenticodeSignature ".\GaoGaoNetAUTO.exe" | Format-List Status,SignerCertificate
+   # Status 应为 Valid
+   ```
 
 ### 4.3 仍然提示「未知发布者」？
 
 说明证书没进对位置。排查：
 
 ```powershell
-# 证书是否在「受信任的根」里
-Get-ChildItem Cert:\LocalMachine\Root | Where-Object { $_.Subject -like "*Gaogao*" }
 # 证书是否在「受信任的发布者」里
 Get-ChildItem Cert:\LocalMachine\TrustedPublisher | Where-Object { $_.Subject -like "*Gaogao*" }
 ```
 
 > **重要提醒：自签名 ≠ SmartScreen 放行。**
-> 导入根证书只解决「谁发布的」，SmartScreen 的**信誉**是基于文件哈希和全球下载量的，新文件必然没有信誉。
+> 导入证书只解决「谁发布的」，SmartScreen 的**信誉**是基于文件哈希和全球下载量的，新文件必然没有信誉。
 > 想彻底消除蓝框，见 §6。
 
 ---
@@ -227,8 +257,13 @@ rsop.msc
 **批量部署时的最佳实践：**
 1. 用受信任证书签名
 2. 把证书链的 `.cer` 随安装包分发
-3. 用 `msiexec` / 组策略 / Intune 做静默安装，把排除项作为安装动作的一部分写入
+3. 用 `msiexec` / 组策略 / Intune 做静默安装
 4. 走 IT 的软件分发渠道，而不是让用户自己下载
+
+> 排除项（`Add-MpPreference -ExclusionPath`）只应在**明确知道目录内容**、
+> 且由 IT 统一管理时使用。给终端用户下发「排除整个安装目录」虽然方便，
+> 但等于在该目录里关掉了杀软检查 —— 内部工具可控，
+> 对外分发则不建议。
 
 ---
 
@@ -275,8 +310,8 @@ python tools\audit_features.py dist\GaoGaoNetAUTO
 ## 9. 一页速查
 
 ```powershell
-# —— 快速放行（管理员 PowerShell）——
-Add-MpPreference -ExclusionPath "D:\Tools\GaoGaoNetAUTO"
+# —— 快速放行（管理员 PowerShell）—— 精确到 exe，不要排除整个目录
+Add-MpPreference -ExclusionPath "D:\Tools\GaoGaoNetAUTO\GaoGaoNetAUTO.exe"
 
 # —— 解除下载标记 ——
 Unblock-File -Path "D:\Downloads\xxx.zip"
@@ -287,8 +322,7 @@ Get-MpThreatDetection | Format-List *
 # —— 扫描确认 ——
 & "$env:ProgramFiles\Windows Defender\MpCmdRun.exe" -Scan -ScanType 3 -File "D:\Tools\GaoGaoNetAUTO"
 
-# —— 导入签名证书（管理员）——
-Import-Certificate -FilePath ".\GaoGaoNetAUTO-sign.cer" -CertStoreLocation Cert:\LocalMachine\Root
+# —— 导入签名证书（管理员，可选）—— 只导入 TrustedPublisher
 Import-Certificate -FilePath ".\GaoGaoNetAUTO-sign.cer" -CertStoreLocation Cert:\LocalMachine\TrustedPublisher
 
 # —— 自查产物特征 ——

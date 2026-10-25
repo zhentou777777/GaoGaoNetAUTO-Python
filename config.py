@@ -1,12 +1,20 @@
 # -*- coding: utf-8 -*-
-"""配置与本地加密存储。
+"""配置与本地凭据存储。
 
-Token 不以明文落盘：以「机器指纹」派生的密钥做流加密 + HMAC 完整性校验后
-存入 config.json，换机器/换用户读出来的密文无法解密。
+凭据保护
+--------
+Token / 密码 / 手机号一律走 :mod:`vault` 加密后落盘：
 
-**数据目录**：配置不放在 exe 旁边（桌面），统一放 C 盘固定目录
-``C:\\GaoGaoNetAUTO\\``，与 exe 放在哪里无关。exe 可以丢在桌面、放在
-``C:\\Program Files\\`` 下，都不会再出现「配置写不进去」或「移走 exe 就丢配置」。
+* Windows → **DPAPI**（``CryptProtectData``）—— 系统级、用户绑定、
+  随机 nonce、自带完整性校验，换用户或换机器解不开。
+* 其他平台 → 带随机 salt/nonce 的降级方案（仅开发环境会走到）。
+
+旧版把「确定性 XOR」当作加密，那是混淆不是加密，历史密文仍可解密，
+但**读到旧格式后会立刻用新方案重新加密**。
+
+**数据目录**：``%LOCALAPPDATA%\\GaoGaoNetAUTO\\``（Windows 标准应用数据目录），
+并收紧 ACL 到「当前用户 + SYSTEM + Administrators」、断开权限继承。
+旧版用的 ``C:\\GaoGaoNetAUTO\\`` 会被自动迁移一次。
 """
 from __future__ import annotations
 
@@ -21,12 +29,24 @@ import time
 from pathlib import Path
 from typing import Any, Dict, Tuple
 
+import vault
+
 CONFIG_NAME = "config.json"
 
 # 数据目录默认值。环境变量 GAOGAO_DATA_DIR 可覆盖（便携/测试用）。
-DEFAULT_DATA_DIR = r"C:\GaoGaoNetAUTO"
+APP_DIR_NAME = "GaoGaoNetAUTO"
+LEGACY_DATA_DIR = r"C:\GaoGaoNetAUTO"
+
+# 允许的网关主机白名单。不同学校的主机不同，但**只允许显式列出**，
+# 防止配置文件被篡改后把 Token 发到任意地址。
+ALLOWED_HOSTS = {
+    "hgs.auth.yungao-tech.com",
+    "user.v4.yungao-tech.com",
+}
+ALLOWED_SCHEMES = ("http", "https")
 
 # ---------------------------------------------------------------- 路径
+
 
 def app_dir() -> Path:
     """程序自身所在目录（仅用于定位随包资源，不存放配置）。"""
@@ -35,15 +55,30 @@ def app_dir() -> Path:
     return Path(__file__).resolve().parent
 
 
-def data_dir() -> Path:
-    """数据目录：固定在 C 盘同名文件夹下，与 exe 位置无关。
+def _local_app_data() -> Path:
+    """Windows 标准应用数据目录；其他平台退回用户目录。"""
+    base = os.environ.get("LOCALAPPDATA")
+    if base:
+        return Path(base)
+    if sys.platform.startswith("win"):
+        return Path.home() / "AppData" / "Local"
+    return Path.home() / ".local" / "share"
 
-    可用环境变量 ``GAOGAO_DATA_DIR`` 覆盖。
+
+def data_dir() -> Path:
+    """数据目录：``%LOCALAPPDATA%\\GaoGaoNetAUTO\\``，与 exe 位置无关。
+
+    可用环境变量 ``GAOGAO_DATA_DIR`` 覆盖。目录创建后会收紧 ACL。
     """
-    raw = os.environ.get("GAOGAO_DATA_DIR") or DEFAULT_DATA_DIR
+    raw = os.environ.get("GAOGAO_DATA_DIR") or str(_local_app_data() / APP_DIR_NAME)
     d = Path(raw)
     try:
+        created = not d.exists()
         d.mkdir(parents=True, exist_ok=True)
+        if created:
+            # 新建目录才收紧 ACL；已存在的目录不改动，避免每次启动都调
+            # 安全 API（也会打扰用户手工设过的权限）。
+            vault.harden_dir_acl(d)
     except Exception:
         # 目录建不出来时退回 exe 旁边，保证程序仍可运行
         d = app_dir()
@@ -77,7 +112,7 @@ DEFAULTS: Dict[str, Any] = {
     "vlan": "0.0",
     # 单设备限制下，被顶掉的手机 IP（留空则不自动顶替）
     "phone_ip": "",
-    # 加密后的 Bearer Token
+    # 加密后的 Bearer Token（DPAPI）
     "token": "",
     # 上一版 Token（L1 自动续存失败时可回退）
     "token_prev": "",
@@ -89,10 +124,7 @@ DEFAULTS: Dict[str, Any] = {
     # 默认不顶替手机——单设备套餐下顶掉手机会让人很困扰，
     # 需要独占时可在设置里手动打开。
     "auto_kick_phone": False,
-    "keep_token_alive": True,
-    # 抓取模式发现的接口模板（可为空）
-    "status_url": "",
-    "complete_url": "",
+    # 抓包模式发现的认证页 URL（可为空；为空则用默认的 /web/network/code）
     "code_page_url": "",
     # 运行状态
     "last_ip": "",
@@ -172,18 +204,11 @@ def _keystream(key: bytes, length: int) -> bytes:
     return bytes(out[:length])
 
 
-def encrypt_token(plain: str) -> str:
-    """加密 Token，返回 base64 字符串（``v1:<payload>``）。"""
-    if not plain:
-        return ""
-    raw = plain.encode("utf-8")
-    enc_key, mac_key = _derive_keys_v2()
-    cipher = bytes(a ^ b for a, b in zip(raw, _keystream(enc_key, len(raw))))
-    tag = hmac.new(mac_key, cipher, hashlib.sha256).digest()[:16]
-    return "v1:" + base64.b64encode(cipher + tag).decode("ascii")
-
-
 def _decrypt_with(blob: str, keys: Tuple[bytes, bytes]) -> str:
+    """用指定密钥解开**历史版**（v1:/v2: 前缀）密文。
+
+    仅用于迁移期读取旧配置；新写入一律走 :mod:`vault`。
+    """
     enc_key, mac_key = keys
     try:
         data = base64.b64decode(blob[3:])
@@ -197,21 +222,25 @@ def _decrypt_with(blob: str, keys: Tuple[bytes, bytes]) -> str:
         return ""
 
 
-def decrypt_token(blob: str) -> str:
-    """解密 Token；失败返回空字符串（密钥变了/文件损坏）。
+def encrypt_token(plain: str) -> str:
+    """加密 Token，返回带版本前缀的密文。
 
-    先用新版轻量种子试，再用旧版 MachineGuid 种子试 —— 保证历史配置
-    不会因为加密方案升级而丢失。
+    主路径是 Windows DPAPI（用户绑定、系统级、随机 nonce）；
+    非 Windows 走带随机 salt/nonce 的降级方案。
+    """
+    if not plain:
+        return ""
+    return vault.protect(plain)
+
+
+def decrypt_token(blob: str) -> str:
+    """解密 Token；失败返回空字符串。
+
+    兼容历史格式：``v2:`` / ``v1:``（旧版自拼 XOR）与纯明文。
     """
     if not blob:
         return ""
-    if not blob.startswith("v1:"):
-        # 兼容手工填写的明文
-        return blob
-    out = _decrypt_with(blob, _derive_keys_v2())
-    if out:
-        return out
-    return _decrypt_with(blob, _derive_keys_v1())
+    return vault.unprotect(blob)
 
 
 # ---------------------------------------------------------------- 配置读写
@@ -225,40 +254,86 @@ class Config:
         self.migrated_from = ""
         self.load()
         self._migrate_from_legacy()
+        self._upgrade_encryption()
+
+    # -------------------------------------------------- 迁移
+
+    def _legacy_candidates(self) -> list[Path]:
+        """历史上用过的配置位置（按优先级）。"""
+        out: list[Path] = []
+        legacy_root = Path(LEGACY_DATA_DIR)
+        if legacy_root != self.path.parent:
+            out.append(legacy_root / CONFIG_NAME)
+        if self.path.parent != app_dir():
+            out.append(app_dir() / CONFIG_NAME)
+        return out
 
     def _migrate_from_legacy(self) -> None:
-        """把旧版「exe 同目录」的 config.json 迁移到数据目录。
+        """把旧版 config.json 迁移到当前数据目录，并**用新方案重新加密**。
 
-        旧版把配置写在 exe 旁边，用户把 exe 放桌面时配置也在桌面，
-        移动/重装 exe 就会丢。新版统一放 C:\\GaoGaoNetAUTO\\。
-        迁移只做一次，**原文件保留不动**（出问题可手工找回）。
+        旧版有两个来源：
+        1. ``C:\\GaoGaoNetAUTO\\config.json``（旧数据目录）
+        2. exe 同目录的 ``config.json``（更早的版本）
+
+        迁移后：
+        * 凭据字段一律用 DPAPI（新版）重新加密，不把旧混淆密文原样搬过去；
+        * 原文件**保留**但不再被读取（用户可自行核对）；
+        * 迁移记录写进 ``migrated_from`` 供 UI 提示。
         """
-        if self.path.parent == app_dir():
-            return  # 已经是 exe 同目录，无需迁移
-        legacy = app_dir() / CONFIG_NAME
-        if not legacy.exists() or legacy == self.path:
-            return
-        try:
-            raw = json.loads(legacy.read_text(encoding="utf-8"))
-            if not isinstance(raw, dict):
-                return
-            # 只有当数据目录里还没有有效配置时才迁移
-            if self.get_token() or self.get_account()[1]:
-                return
-            self.data.update(raw)
-            self.save()
-            self.migrated_from = str(legacy)
-        except Exception:
-            pass
-
-    def load(self) -> "Config":
-        if self.path.exists():
+        if self.get_token() or self.get_account()[1]:
+            return  # 当前目录已有可用配置，不再迁移
+        for legacy in self._legacy_candidates():
+            if not legacy.exists() or legacy == self.path:
+                continue
             try:
-                raw = json.loads(self.path.read_text(encoding="utf-8"))
-                if isinstance(raw, dict):
-                    self.data.update(raw)
+                raw = json.loads(legacy.read_text(encoding="utf-8"))
+                if not isinstance(raw, dict):
+                    continue
+                self.data.update(raw)
+                self._upgrade_encryption()
+                self.save()
+                self.migrated_from = str(legacy)
+                return
+            except Exception:
+                continue
+
+    def _upgrade_encryption(self) -> None:
+        """把旧版混淆密文（v1:/v2:/明文）重新加密为新版（DPAPI）。
+
+        只在**能成功解出明文**时才重写，解不开就原样保留，
+        避免把用户唯一一份可用凭据改成空值。
+        """
+        changed = False
+        for key in ("token", "token_prev", "account_mobile", "account_password"):
+            blob = str(self.data.get(key, "") or "")
+            if not blob:
+                continue
+            if vault.is_protected(blob):
+                continue
+            plain = vault.unprotect(blob)
+            if not plain:
+                continue
+            self.data[key] = vault.protect(plain)
+            changed = True
+        if changed:
+            try:
+                self.save()
             except Exception:
                 pass
+
+    # -------------------------------------------------- 读写
+
+    def load(self) -> "Config":
+        for src in (self.path, self.path.parent / "config.json.bak"):
+            if not src.exists():
+                continue
+            try:
+                raw = json.loads(src.read_text(encoding="utf-8"))
+                if isinstance(raw, dict):
+                    self.data.update(raw)
+                    break
+            except Exception:
+                continue
         return self
 
     def save(self) -> None:
@@ -307,24 +382,99 @@ class Config:
     def has_token(self) -> bool:
         return bool(self.get_token())
 
+    def get_token_prev(self) -> str:
+        """取上一版 Token（服务端下发新 Token 时自动留的备份）。
+
+        当前 Token 判定失效时，可以回退试一次这个 —— 它往往还没过期。
+        """
+        return decrypt_token(str(self.get("token_prev", "") or ""))
+
     # -------------------------------------------------- 账号密码（加密存储）
 
     def get_account(self) -> tuple[str, str]:
-        """取 (手机号, 密码)。密码与 Token 同样加密存储。"""
-        mobile = str(self.get("account_mobile", "") or "")
+        """取 (手机号, 密码)。
+
+        手机号同样加密存储 —— 明文手机号落在磁盘上会让「拿到 config.json
+        就等于拿到用户身份」。
+        """
+        mobile_blob = str(self.get("account_mobile", "") or "")
         pwd_blob = str(self.get("account_password", "") or "")
+        mobile = decrypt_token(mobile_blob) if mobile_blob else ""
         return mobile, decrypt_token(pwd_blob)
 
     def set_account(self, mobile: str, password: str, save: bool = True) -> None:
-        self.set("account_mobile", (mobile or "").strip(), save=False)
+        self.set("account_mobile", encrypt_token((mobile or "").strip()), save=False)
         self.set("account_password", encrypt_token(password or ""), save=save)
 
     def has_account(self) -> bool:
         mobile, pwd = self.get_account()
         return bool(mobile and pwd)
 
+    # -------------------------------------------------- 清除凭据
+
+    def clear_credentials(self) -> None:
+        """清除所有已保存的凭据（Token / 手机号 / 密码）。
+
+        用于「换人用这台电脑」「怀疑凭据泄露」的场景。
+        备份文件也一并覆写删除，避免旧密文残留。
+        """
+        for key in ("token", "token_prev", "account_mobile", "account_password"):
+            self.data[key] = ""
+        self.save()
+        for extra in (self.path.parent / "config.json.bak",):
+            try:
+                if extra.exists():
+                    vault.wipe(extra)
+            except Exception:
+                pass
+        # 扫码临时二维码也一并清掉
+        try:
+            (self.path.parent / "qr_tmp.png").unlink()
+        except Exception:
+            pass
+
     # -------------------------------------------------- 连接信息
 
     @property
     def base_url(self) -> str:
         return f"{self.get('scheme')}://{self.get('host')}:{self.get('port')}"
+
+    # -------------------------------------------------- 网关校验
+
+    @staticmethod
+    def validate_gateway(host: str, scheme: str, port: int) -> tuple[bool, str]:
+        """校验网关地址是否可信。
+
+        规则：
+        * scheme 只能是 http / https；
+        * host 必须在 :data:`ALLOWED_HOSTS` 白名单内；
+        * port 必须在 1–65535。
+
+        返回 ``(是否合法, 错误说明)``。
+        """
+        scheme = (scheme or "").strip().lower()
+        host = (host or "").strip().lower()
+        if scheme not in ALLOWED_SCHEMES:
+            return False, f"协议只能是 {'/'.join(ALLOWED_SCHEMES)}，当前是「{scheme}」"
+        if not host:
+            return False, "网关地址不能为空"
+        if host not in ALLOWED_HOSTS:
+            return False, (
+                f"网关「{host}」不在白名单内。"
+                f"允许的地址：{'、'.join(sorted(ALLOWED_HOSTS))}"
+            )
+        try:
+            p = int(port)
+        except Exception:
+            return False, "端口必须是数字"
+        if not (1 <= p <= 65535):
+            return False, f"端口 {p} 超出范围"
+        return True, ""
+
+    def gateway_valid(self) -> tuple[bool, str]:
+        """校验当前配置里的网关地址。"""
+        return self.validate_gateway(
+            str(self.get("host") or ""),
+            str(self.get("scheme") or ""),
+            int(self.get("port") or 0),
+        )

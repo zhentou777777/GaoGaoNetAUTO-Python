@@ -31,10 +31,11 @@
 from __future__ import annotations
 
 import base64
+import json
 import re
 import time
 from dataclasses import dataclass
-from typing import Optional, Tuple
+from typing import Optional, Tuple, Union
 
 # 扫码页里可能出现的"二维码内容"字段名（按优先级）
 _QR_VAR_NAMES = (
@@ -42,9 +43,34 @@ _QR_VAR_NAMES = (
     "authUrl", "auth_url", "url", "link", "token",
 )
 
-_STATUS_OK = ("已认证", "认证成功", "已上线", "已通过", "授权成功", "success", "已登录")
-_STATUS_SCANNED = ("已扫描", "等待确认", "请在手机上确认", "scanned")
+# 扫码页状态判定。
+#
+# ⚠️ 这里**不能**用 "success" 这类泛词做全文子串匹配：
+# 扫码页的 JS 里出现 `var success = true;` 之类是家常便饭，
+# 全文匹配会得出「还没扫就授权成功」的假阳性。
+#
+# 现在的做法：
+#   1) 先尝试**结构化**提取状态字段（status/state/code 变量或 JSON 字段）；
+#   2) 只有结构化提取失败时，才退回中文状态文案匹配，
+#      且成功词只用中文/明确英文短语，不用裸 "success"。
+_STATUS_OK = ("已认证", "认证成功", "已上线", "已通过", "授权成功",
+              "已登录", "auth_success", "authorized")
+_STATUS_SCANNED = ("已扫描", "等待确认", "请在手机上确认", "已扫码")
 _STATUS_EXPIRED = ("已过期", "已失效", "二维码失效", "expired", "请刷新")
+
+# 结构化状态字段名（按优先级）
+_STATUS_FIELD_NAMES = ("status", "state", "scanStatus", "qrStatus",
+                        "authStatus", "result")
+
+# 结构化状态值 → 内部状态
+_STATUS_VALUE_MAP = {
+    "authorized": "authorized", "auth_success": "authorized",
+    "success": "authorized", "ok": "authorized", "confirmed": "authorized",
+    "scanned": "scanned", "waiting_confirm": "scanned",
+    "pending": "scanned",
+    "expired": "expired", "invalid": "expired", "timeout": "expired",
+    "waiting": "waiting", "pending_scan": "waiting", "created": "waiting",
+}
 
 # 二维码会话有效期（分钟）——与服务端 str cookie 的 10 分钟一致
 SESSION_TTL_MINUTES = 10
@@ -117,8 +143,59 @@ def extract_code(html: str) -> str:
     return m.group(1) if m else ""
 
 
-def find_qr_image(html: str) -> Optional[bytes]:
-    """尝试直接取出服务端渲染好的二维码图片（base64 内联或外链 URL）。"""
+def extract_status(html: str) -> str:
+    """从扫码页里**结构化**提取状态，返回内部状态名或空串。
+
+    优先找 JS 变量（``var status = "authorized"``）和 JSON 字段
+    （``{"status": "authorized"}``）。这样避免把页面里任意位置出现的
+    ``success`` 字样误判成「已授权」。
+
+    提取不到时返回空串，由调用方退回文案匹配。
+    """
+    if not html:
+        return ""
+
+    # 1) JSON 片段
+    for m in re.finditer(r"\{[^{}]{0,400}\}", html):
+        try:
+            obj = json.loads(m.group(0))
+        except Exception:
+            continue
+        if isinstance(obj, dict):
+            for name in _STATUS_FIELD_NAMES:
+                val = obj.get(name)
+                if isinstance(val, str):
+                    st = _STATUS_VALUE_MAP.get(val.strip().lower())
+                    if st:
+                        return st
+
+    # 2) JS 变量
+    for name in _STATUS_FIELD_NAMES:
+        m = re.search(rf'var\s+{re.escape(name)}\s*=\s*"([^"]*)"', html)
+        if m:
+            st = _STATUS_VALUE_MAP.get(m.group(1).strip().lower())
+            if st:
+                return st
+
+    # 3) JSON 里以引号包裹的字段（不严格是合法 JSON 的情况）
+    for name in _STATUS_FIELD_NAMES:
+        m = re.search(rf'"{re.escape(name)}"\s*:\s*"([^"]*)"', html)
+        if m:
+            st = _STATUS_VALUE_MAP.get(m.group(1).strip().lower())
+            if st:
+                return st
+
+    return ""
+
+
+def find_qr_image(html: str) -> Optional[Union[bytes, str]]:
+    """尝试直接取出服务端渲染好的二维码图片。
+
+    返回：
+      * ``bytes`` —— 内联 base64 的图片数据
+      * ``str``   —— 外链图片 URL（需再下载）
+      * ``None``  —— 页面里没有现成的图片
+    """
     if not html:
         return None
 
@@ -133,7 +210,7 @@ def find_qr_image(html: str) -> Optional[bytes]:
     urls = re.findall(r'src\s*=\s*["\']([^"\']+\.(?:png|jpg|jpeg|gif))["\']', html, re.I)
     for url in urls:
         if "qr" in url.lower() or "code" in url.lower():
-            return url  # type: ignore[return-value]
+            return url
     return None
 
 
@@ -152,6 +229,9 @@ class QrAssistant:
         # 轮询期间服务端会因重新拉页面而不断下发新的 str cookie，
         # 这里把原始的会话 UUID 固定下来，避免被覆盖。
         self._session_cookie = ""
+        # 初始页面 HTML 缓存 —— 轮询阶段**不再**重新拉 code 页，
+        # 只在需要时重新请求状态接口。
+        self._initial_html = ""
 
     # ------------------------------------------------------------ 拉取
 
@@ -163,6 +243,8 @@ class QrAssistant:
         self.state = QrState()
         self.state.code = code or extract_code(html)
         self.state.payload = extract_qr_payload(html)
+        # 缓存初始页面，供轮询阶段做状态判定（不再重复请求 code 页）
+        self._initial_html = html or ""
 
         # str cookie 是服务端认的会话标识，优先用它
         cookie_uuid = ""
@@ -293,13 +375,34 @@ class QrAssistant:
             self.state.message = "二维码已过期，请刷新"
             return self.state
 
-        try:
-            _code, html = self.auth.fetch_code_page(ip, mac)
-        except Exception:
-            html = ""
+        # --- 信号 4：页面状态 ---
+        # ⚠️ 这里**不能**在轮询里重新拉 /web/network/code：
+        #   每次请求服务端都会下发新的 str，会让正在显示的二维码/会话失效，
+        #   也会浪费请求。轮询阶段只用缓存的初始页面 + 结构化状态提取。
+        html = self._initial_html or ""
         if html:
-            # 老页面结构兜底：页面里直接写了状态文案
-            low = (html or "").lower()
+            # 3.1) 先做结构化状态提取（可靠）
+            st = extract_status(html)
+            if st == "authorized":
+                self.state.status = "authorized"
+                self.state.message = "已授权，正在为设备上线"
+                return self.state
+            if st == "expired":
+                self.state.status = "expired"
+                self.state.message = "二维码已过期，请刷新"
+                return self.state
+            if st == "scanned":
+                self.state.status = "scanned"
+                self.state.message = "已扫描，请在手机上确认"
+                return self.state
+            if st == "waiting":
+                self.state.status = "waiting"
+                self.state.message = "请用糕糕 APP 扫描二维码"
+                return self.state
+
+            # 3.2) 结构化提取不到，才退回中文文案匹配
+            #     （成功词只用中文/明确短语，不用裸 "success"）
+            low = html.lower()
             for kw in _STATUS_OK:
                 if kw.lower() in low:
                     self.state.status = "authorized"

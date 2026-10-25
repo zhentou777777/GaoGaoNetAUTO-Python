@@ -223,9 +223,9 @@ tr:nth-child(even) td{background:rgba(255,255,255,.015)}
 </tr>
 <tr>
 <td><strong>R9</strong></td>
-<td>配置文件夹不要直接放桌面，放 C 盘同名文件夹</td>
+<td>配置文件夹不要直接放桌面</td>
 <td><strong>已实现</strong></td>
-<td><code>config.py</code> <code>data_dir()</code> → <code>C:\GaoGaoNetAUTO\</code>（<code>config.json</code> / <code>config.json.bak</code> / <code>assets/</code> / <code>qr_tmp.png</code> / <code>logs/</code>），与 exe 位置解耦；旧配置自动迁移一次（原文件保留）；<code>GAOGAO_DATA_DIR</code> 环境变量可覆盖</td>
+<td><code>config.py</code> <code>data_dir()</code> → <code>%LOCALAPPDATA%\GaoGaoNetAUTO\</code>（<code>config.json</code> / <code>config.json.bak</code> / <code>assets/</code> / <code>qr_tmp.png</code> / <code>logs/</code>），与 exe 位置解耦；旧配置（<code>C:\GaoGaoNetAUTO\</code> 或 exe 同目录）自动迁移一次并用 DPAPI 重加密（原文件保留）；<code>GAOGAO_DATA_DIR</code> 环境变量可覆盖</td>
 </tr>
 <tr>
 <td><strong>R10</strong></td>
@@ -271,7 +271,14 @@ tr:nth-child(even) td{background:rgba(255,255,255,.015)}
 <td>NAT 模式判定</td>
 <td>出口 IP</td>
 <td>是否处于 NAT 之后</td>
-<td><strong>主判据：出口 IP ≠ 本机 IP</strong>；外呼失败时兜底用私有网关 + 子网比对</td>
+<td><strong>保守启发式</strong>：私有出口 IP + 排除 <code>10.135.</code> 校园网段 + 默认网关为私有地址；<strong>判不出就返回 False</strong>（宁可不提示，也不误判）</td>
+</tr>
+<tr>
+<td>F-3b</td>
+<td><strong>已在线权威判定</strong></td>
+<td>出口 IP + Token</td>
+<td>服务端在线列表里是否已有本机出口 IP</td>
+<td>这是「共享模式」的唯一依据——查服务端列表，而非本地猜测</td>
 </tr>
 <tr>
 <td>F-4</td>
@@ -336,6 +343,20 @@ tr:nth-child(even) td{background:rgba(255,255,255,.015)}
 <td>响应体/响应头</td>
 <td>新 Token</td>
 <td>未找到 → None（退回旧 Token）</td>
+</tr>
+<tr>
+<td>F-13</td>
+<td><strong>传输安全闸门</strong></td>
+<td>host / scheme / port</td>
+<td>是否允许发送带 Token 的请求</td>
+<td>非白名单主机 → <strong>在发出请求前拦下</strong>并返回原因；白名单在 <code>config.ALLOWED_HOSTS</code> / <code>ALLOWED_SCHEMES</code></td>
+</tr>
+<tr>
+<td>F-14</td>
+<td><strong>HTTP 风险提示</strong></td>
+<td>当前 scheme</td>
+<td>提示文案</td>
+<td><code>scheme == &quot;http&quot;</code> → 明确提示 Token 会明文过内网；https → 无提示</td>
 </tr>
 </tbody></table>
 <h3>4.2 认证链（<code>login_chain</code>，四级 + 共享前置）</h3>
@@ -403,6 +424,12 @@ tr:nth-child(even) td{background:rgba(255,255,255,.015)}
 <td><code>auth.py</code> <code>_extract_new_token</code></td>
 </tr>
 <tr>
+<td><strong>L1b</strong></td>
+<td>当前 Token 认证失败（判定 TOKEN_INVALID）</td>
+<td><strong>回退重试</strong>一次上一版 Token（<code>token_prev</code>）；成功则继续用旧值</td>
+<td><code>config.get_token_prev()</code></td>
+</tr>
+<tr>
 <td><strong>L2</strong></td>
 <td>Token 确实拿不到，但用户在场</td>
 <td>降级到扫码登录（本地渲染二维码，无需 APP 页面）</td>
@@ -422,7 +449,11 @@ tr:nth-child(even) td{background:rgba(255,255,255,.015)}
 </tr></thead><tbody>
 <tr>
 <td>连通性探测</td>
-<td>TCP connect 探测 <code>223.5.5.5:53</code> / <code>119.29.29.29:53</code> / <code>1.1.1.1:443</code> / <code>114.114.114.114:80</code>，任一通即算在线；<strong>不发应用层流量</strong></td>
+<td><strong>带预期内容的 HTTPS 探测</strong>：依次请求 <code>connectivitycheck.gstatic.com/generate_204</code>（期望 <code>204</code>）、<code>msftconnecttest.com/connecttest.txt</code>（期望 <code>Microsoft Connect Test</code>）、<code>captive.apple.com/hotspot-detect.html</code>（期望 <code>Success</code>）；<strong>HTTP 200 且响应体含特征串</strong>才算在线</td>
+</tr>
+<tr>
+<td>门户劫持识别</td>
+<td>301/302/303/307/308 重定向（captive portal）一律<strong>不算在线</strong>，继续试下一个目标</td>
 </tr>
 <tr>
 <td>探测周期</td>
@@ -438,7 +469,7 @@ tr:nth-child(even) td{background:rgba(255,255,255,.015)}
 </tr>
 <tr>
 <td>出口 IP 漂移</td>
-<td>检测到本机出口 IP 变化即上报 <code>ip_changed</code>（校园网重分配地址后旧授权失效）</td>
+<td>检测到本机<strong>出口 IP</strong> 变化即上报 <code>ip_changed</code>（校园网重分配地址后旧授权失效）。以出口 IP 为准，而非网卡 IP —— 走热点时网卡 IP 不变但出口已换</td>
 </tr>
 <tr>
 <td>重连退避</td>
@@ -516,29 +547,31 @@ tr:nth-child(even) td{background:rgba(255,255,255,.015)}
 </tr></thead><tbody>
 <tr>
 <td>存储位置</td>
-<td><strong>改造后</strong>统一 <code>C:\GaoGaoNetAUTO\config.json</code>（可用环境变量 <code>GAOGAO_DATA_DIR</code> 覆盖）</td>
+<td><strong>改造后</strong>统一 <code>%LOCALAPPDATA%\GaoGaoNetAUTO\config.json</code>（可用环境变量 <code>GAOGAO_DATA_DIR</code> 覆盖）；目录创建时收紧 ACL（仅当前用户 + SYSTEM + Administrators 可写）</td>
 </tr>
 <tr>
 <td>加密方案</td>
-<td>机器指纹 → SHA-256 派生加密密钥与 MAC 密钥 → SHA-256 计数器流（keystream）XOR → HMAC-SHA256 截断 16 字节做完整性校验 → <code>v1:&lt;base64&gt;</code></td>
+<td><strong>Windows DPAPI</strong>（<code>CryptProtectData</code>，系统级、用户绑定、随机 nonce、自带完整性校验）→ <code>dpapi:&lt;base64&gt;</code>；DPAPI 不可用时降级为 PBKDF2-HMAC-SHA256(100k) + HMAC-SHA256 认证加密 → <code>v3x:&lt;base64&gt;</code></td>
 </tr>
 <tr>
 <td>密钥种子</td>
-<td>Windows 读 <code>HKLM\SOFTWARE\Microsoft\Cryptography\MachineGuid</code>；失败退化为 `node</td>
-<td>machine</td>
-<td>login`</td>
+<td>DPAPI 由系统 LSA 托管，程序不读取任何机器指纹；降级方案的主密钥存 sidecar <code>vault.key</code>（0600）</td>
 </tr>
 <tr>
 <td>向后兼容</td>
-<td><code>decrypt_token()</code> 兼容手工填写的<strong>明文</strong> Token（非 <code>v1:</code> 前缀直接原样返回）</td>
+<td><code>decrypt_token()</code> 兼容手工填写的<strong>明文</strong> Token；旧 <code>v1:</code> / <code>v2:</code> 混淆密文仍可解密，读到后立即重写为 DPAPI</td>
 </tr>
 <tr>
 <td>自动备份</td>
-<td>每次 <code>save()</code> 后写 <code>config_backup/config-&lt;时间戳&gt;.json</code>，保留最近 3 份（改造后收敛为 1 份 <code>config.json.bak</code>）</td>
+<td>每次 <code>save()</code> 后写 <code>config.json.bak</code>（保留 1 份）；主文件损坏时自动回退读备份</td>
 </tr>
 <tr>
 <td>账号密码</td>
-<td><code>account_mobile</code> 明文存储；<code>account_password</code> 加密存储</td>
+<td><code>account_mobile</code> 与 <code>account_password</code> <strong>均加密存储</strong>（同走 DPAPI），手机号仅在日志/界面以 <code>138****8000</code> 形式出现</td>
+</tr>
+<tr>
+<td>清除凭据</td>
+<td><code>Config.clear_credentials()</code> 抹掉 Token / 上一版 Token / 手机号 / 密码，覆写删除备份文件与临时二维码；界面对应「清除已保存凭据」按钮（二次确认）</td>
 </tr>
 </tbody></table>
 <h3>4.8 界面模块（<code>main.py</code>）</h3>
@@ -560,7 +593,7 @@ tr:nth-child(even) td{background:rgba(255,255,255,.015)}
 </tr>
 <tr>
 <td>操作按钮（6 个）</td>
-<td>立即认证 / 扫码登录 / 抢占上线 / 在线设备 / 归还名额 / 检查 Token</td>
+<td>立即认证 / 扫码登录 / 抢占上线 / 在线设备 / 归还名额 / 检查 Token（只读体检，调 <code>onestatus</code>，<strong>不改变在线状态</strong>）</td>
 </tr>
 <tr>
 <td>按钮自适应</td>
@@ -569,6 +602,26 @@ tr:nth-child(even) td{background:rgba(255,255,255,.015)}
 <tr>
 <td>设置面板</td>
 <td>右侧 <code>Canvas + Scrollbar</code> 可滚动，避免内容被裁掉</td>
+</tr>
+<tr>
+<td>设置项</td>
+<td>网关地址（白名单校验后保存）/ 账号密码 / 开机自启 / 顶替手机 / <strong>清除已保存凭据</strong>（二次确认）</td>
+</tr>
+<tr>
+<td>主线程约束</td>
+<td><strong>Tk 主线程不做网络 I/O</strong>：<code>_update_info</code> / <code>_refresh_devices</code> 拆为「缓存立即渲染 + 后台线程取新值 + 队列回主线程渲染」，避免界面卡死</td>
+</tr>
+<tr>
+<td>异常兜底</td>
+<td>后台认证 / 抢占 / 扫码流程统一 <code>try/finally</code>：异常时按钮自动恢复、状态不卡死、临时二维码必定清理</td>
+</tr>
+<tr>
+<td>账号熔断</td>
+<td>账号密码自动登录连续失败 3 次后<strong>暂停 5 分钟</strong>，避免错误密码反复重试触发服务端风控</td>
+</tr>
+<tr>
+<td>日志区</td>
+<td>实时滚动输出，可清空；<strong>同时落盘</strong>到 <code>logs/app.log</code>（自动脱敏 + 轮转）</td>
 </tr>
 <tr>
 <td>状态卡</td>
@@ -612,12 +665,22 @@ tr:nth-child(even) td{background:rgba(255,255,255,.015)}
 <tr>
 <td><strong>安全性</strong></td>
 <td>Token 不以明文落盘</td>
-<td>指纹派生密钥 + XOR 流加密 + HMAC 校验</td>
+<td><strong>Windows DPAPI</strong> 加密（用户绑定、系统级、随机 nonce、自带完整性校验），降级方案为 PBKDF2 + HMAC 认证加密</td>
+</tr>
+<tr>
+<td><strong>安全性</strong></td>
+<td>凭据文件不被同机其他账号读取</td>
+<td>数据目录 ACL 收紧（仅当前用户 / SYSTEM / Administrators），并对关键文件覆写删除</td>
+</tr>
+<tr>
+<td><strong>安全性</strong></td>
+<td>Token 不会被误发到非网关主机</td>
+<td>网关主机/协议/端口<strong>白名单闸门</strong>（保存时 + 每次请求前双重校验）</td>
 </tr>
 <tr>
 <td><strong>安全性</strong></td>
 <td>日志不泄漏凭据</td>
-<td>手机号脱敏；Token 不进日志；错误提示不含 Token</td>
+<td>落盘日志统一脱敏（Authorization 头、<code>token</code>/<code>password</code> 字段、11 位手机号、≥24 位长串），并自动轮转</td>
 </tr>
 <tr>
 <td><strong>安全性</strong></td>
@@ -730,9 +793,9 @@ tr:nth-child(even) td{background:rgba(255,255,255,.015)}
 </tr>
 <tr>
 <td><code>account_mobile</code></td>
-<td>str</td>
+<td>str(密文)</td>
 <td><code>&quot;&quot;</code></td>
-<td>云高账号手机号，<strong>明文</strong></td>
+<td>云高账号手机号，<strong>DPAPI 加密存储</strong></td>
 <td>中</td>
 </tr>
 <tr>
@@ -757,27 +820,6 @@ tr:nth-child(even) td{background:rgba(255,255,255,.015)}
 <td>低</td>
 </tr>
 <tr>
-<td><code>keep_token_alive</code></td>
-<td>bool</td>
-<td><code>True</code></td>
-<td>是否保持 Token 活跃</td>
-<td>低</td>
-</tr>
-<tr>
-<td><code>status_url</code></td>
-<td>str</td>
-<td><code>&quot;&quot;</code></td>
-<td>抓包发现的授权状态查询接口（可空）</td>
-<td>低</td>
-</tr>
-<tr>
-<td><code>complete_url</code></td>
-<td>str</td>
-<td><code>&quot;&quot;</code></td>
-<td>抓包发现的完成回调（可空）</td>
-<td>低</td>
-</tr>
-<tr>
 <td><code>code_page_url</code></td>
 <td>str</td>
 <td><code>&quot;&quot;</code></td>
@@ -799,6 +841,33 @@ tr:nth-child(even) td{background:rgba(255,255,255,.015)}
 <td>低</td>
 </tr>
 </tbody></table>
+<blockquote><p>已删除的历史配置键（读写时忽略，迁移时自动丢弃）：<code>keep_token_alive</code>、<code>status_url</code>、<code>complete_url</code>。</p></blockquote>
+<h3>6.1.1 网关地址白名单（新增）</h3>
+<table><thead><tr>
+<th>项</th>
+<th>内容</th>
+</tr></thead><tbody>
+<tr>
+<td>允许主机</td>
+<td><code>hgs.auth.yungao-tech.com</code>、<code>user.v4.yungao-tech.com</code></td>
+</tr>
+<tr>
+<td>允许协议</td>
+<td><code>http</code>、<code>https</code></td>
+</tr>
+<tr>
+<td>端口范围</td>
+<td>1 ~ 65535</td>
+</tr>
+<tr>
+<td>生效点</td>
+<td><code>Config.validate_gateway()</code> 在保存设置时校验；<code>auth._get()</code> 在<strong>发出任何带 Token 的请求前</strong>再次拦截</td>
+</tr>
+<tr>
+<td>失败行为</td>
+<td>拒绝发送并返回明确原因（防止误把 Token 发往非白名单主机）</td>
+</tr>
+</tbody></table>
 <h3>6.2 落盘文件</h3>
 <table><thead><tr>
 <th>文件</th>
@@ -807,33 +876,33 @@ tr:nth-child(even) td{background:rgba(255,255,255,.015)}
 </tr></thead><tbody>
 <tr>
 <td><code>config.json</code></td>
-<td><code>C:\GaoGaoNetAUTO\</code></td>
-<td>上述全部配置</td>
+<td><code>%LOCALAPPDATA%\GaoGaoNetAUTO\</code></td>
+<td>上述全部配置（敏感项为密文）</td>
 </tr>
 <tr>
 <td><code>config.json.bak</code></td>
-<td><code>C:\GaoGaoNetAUTO\</code></td>
-<td>自动备份（改造后保留 1 份）</td>
+<td><code>%LOCALAPPDATA%\GaoGaoNetAUTO\</code></td>
+<td>自动备份（保留 1 份），主文件损坏时自动回退</td>
 </tr>
 <tr>
-<td><code>config_backup/config-&lt;时间戳&gt;.json</code></td>
-<td>同级（改造前行为）</td>
-<td>自动备份，保留 3 份</td>
+<td><code>vault.key</code></td>
+<td><code>%LOCALAPPDATA%\GaoGaoNetAUTO\</code></td>
+<td>DPAPI 不可用时的降级主密钥（0600）</td>
 </tr>
 <tr>
 <td><code>assets/icon.png</code> / <code>icon.ico</code></td>
-<td><code>C:\GaoGaoNetAUTO\assets\</code></td>
+<td><code>%LOCALAPPDATA%\GaoGaoNetAUTO\assets\</code></td>
 <td>程序图标（<code>icons.py</code> 纯 Python 生成，不依赖 Pillow）</td>
 </tr>
 <tr>
 <td><code>qr_tmp.png</code></td>
-<td><code>C:\GaoGaoNetAUTO\</code></td>
-<td>扫码窗口临时二维码</td>
+<td><code>%LOCALAPPDATA%\GaoGaoNetAUTO\</code></td>
+<td>扫码窗口临时二维码（会话结束即删）</td>
 </tr>
 <tr>
-<td><code>logs/</code></td>
-<td><code>C:\GaoGaoNetAUTO\logs\</code></td>
-<td>运行日志（改造项）</td>
+<td><code>logs/app.log</code></td>
+<td><code>%LOCALAPPDATA%\GaoGaoNetAUTO\logs\</code></td>
+<td>落盘日志（自动轮转，保留 3 份，全部脱敏）</td>
 </tr>
 </tbody></table>
 <hr>
@@ -1139,15 +1208,15 @@ tr:nth-child(even) td{background:rgba(255,255,255,.015)}
 </tr>
 <tr>
 <td>A14</td>
-<td>旧版本 <code>config.json</code>（exe 同目录）</td>
+<td>旧版本 <code>config.json</code>（exe 同目录或 <code>C:\GaoGaoNetAUTO\</code>）</td>
 <td>首次运行改造后的版本</td>
-<td>自动迁移到 <code>C:\GaoGaoNetAUTO\</code>，Token 可正常读出</td>
+<td>自动迁移到 <code>%LOCALAPPDATA%\GaoGaoNetAUTO\</code>，Token 可正常读出且已重加密为 DPAPI</td>
 </tr>
 <tr>
 <td>A15</td>
 <td>onedir zip 解压后</td>
 <td>双击 exe</td>
-<td>正常启动，配置写在 <code>C:\GaoGaoNetAUTO\</code>，exe 目录<strong>无任何写入</strong></td>
+<td>正常启动，配置写在 <code>%LOCALAPPDATA%\GaoGaoNetAUTO\</code>，exe 目录<strong>无任何写入</strong></td>
 </tr>
 <tr>
 <td>A16</td>
@@ -1221,10 +1290,10 @@ tr:nth-child(even) td{background:rgba(255,255,255,.015)}
 </tr>
 <tr>
 <td>L7</td>
-<td>手机号明文存储</td>
-<td>中等风险</td>
-<td>低</td>
-<td>与 Token 一并加密（需同步改 <code>get_account</code>）</td>
+<td>~~手机号明文存储~~</td>
+<td>—</td>
+<td>—</td>
+<td><strong>已修复</strong>：手机号与 Token 同走 DPAPI，落盘只有密文</td>
 </tr>
 <tr>
 <td>L8</td>
