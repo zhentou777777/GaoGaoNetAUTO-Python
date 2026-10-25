@@ -1,0 +1,1357 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>糕糕校园网自动认证 · 需求说明书</title>
+<style>
+:root{
+  --bg:#0f1115; --card:#171a21; --card2:#1e222b; --border:#272c37;
+  --text:#e6e9ef; --text2:#a8b0c0; --text3:#7b8496;
+  --accent:#fb7299; --accent2:#4ade80; --code:#0b0d11;
+}
+@media (prefers-color-scheme: light){
+  :root{
+    --bg:#f7f8fa; --card:#ffffff; --card2:#f2f4f7; --border:#e2e6ec;
+    --text:#1a1d23; --text2:#4a5262; --text3:#7b8496;
+    --accent:#e0517d; --accent2:#16a34a; --code:#f4f6f9;
+  }
+}
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{
+  margin:0; background:var(--bg); color:var(--text);
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei UI",
+    "PingFang SC","Hiragino Sans GB",sans-serif;
+  font-size:16px; line-height:1.78;
+}
+.wrap{max-width:820px;margin:0 auto;padding:32px 20px 80px}
+h1{
+  font-size:30px;line-height:1.3;margin:0 0 8px;font-weight:700;
+  letter-spacing:-.02em;
+}
+.sub{color:var(--text3);font-size:14px;margin:0 0 28px}
+h2{
+  font-size:22px;margin:44px 0 14px;font-weight:650;
+  padding-bottom:10px;border-bottom:1px solid var(--border);
+  scroll-margin-top:16px;
+}
+h3{font-size:17.5px;margin:28px 0 10px;font-weight:600;color:var(--text)}
+p{margin:12px 0}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+hr{border:0;border-top:1px solid var(--border);margin:36px 0}
+blockquote{
+  margin:16px 0;padding:12px 16px;background:var(--card2);
+  border-left:3px solid var(--accent);border-radius:0 8px 8px 0;
+  color:var(--text2);font-size:15px;
+}
+blockquote p{margin:6px 0}
+ul,ol{padding-left:22px;margin:12px 0}
+li{margin:6px 0}
+code{
+  background:var(--code);border:1px solid var(--border);border-radius:5px;
+  padding:1px 6px;font-size:.87em;
+  font-family:"Cascadia Mono",Consolas,"SF Mono",Menlo,monospace;
+  color:var(--accent);
+}
+pre{
+  background:var(--code);border:1px solid var(--border);border-radius:10px;
+  padding:14px 16px;overflow-x:auto;margin:16px 0;
+}
+pre code{
+  background:none;border:0;padding:0;color:var(--text2);font-size:13.5px;
+  line-height:1.65;display:block;
+}
+table{
+  width:100%;border-collapse:collapse;margin:16px 0;font-size:14.5px;
+  display:block;overflow-x:auto;
+}
+th,td{
+  border:1px solid var(--border);padding:9px 12px;text-align:left;
+  vertical-align:top;
+}
+th{background:var(--card2);font-weight:600;white-space:nowrap}
+tr:nth-child(even) td{background:rgba(255,255,255,.015)}
+.toc{
+  background:var(--card);border:1px solid var(--border);border-radius:12px;
+  padding:18px 22px;margin:28px 0;
+}
+.toc h2{margin:0 0 10px;font-size:15px;border:0;padding:0;color:var(--text3);
+  text-transform:uppercase;letter-spacing:.08em;font-weight:600}
+.toc ol{margin:0;padding-left:20px;columns:2;column-gap:28px}
+.toc li{margin:4px 0;font-size:14.5px;break-inside:avoid}
+.toc a{color:var(--text2)}
+.toc a:hover{color:var(--accent)}
+.anchor{
+  margin:0 0 6px;padding:12px 18px;background:var(--card);
+  border:1px solid var(--border);border-radius:10px;
+}
+.anchor b{color:var(--accent2)}
+@media (max-width:600px){
+  .wrap{padding:22px 16px 60px}
+  h1{font-size:24px} h2{font-size:19px} h3{font-size:16.5px}
+  .toc ol{columns:1}
+  body{font-size:15.5px}
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+<h1>糕糕校园网自动认证 · 需求说明书</h1>
+<p class="sub">要解决什么、要做到什么、做到没有</p>
+<blockquote><p>项目代号：<strong>GaoGaoNetAUTO-Python</strong></p><p>仓库：https://github.com/zhentou777777/GaoGaoNetAUTO-Python</p><p>文档版本：v1.0.0</p><p>适用产物：<code>GaoGaoNetAUTO.exe</code>（Windows 10/11 x64）</p><p>许可证：GPL-2.0</p></blockquote>
+<hr>
+<div class="toc"><h2>目录</h2><ol><li><a href="#一-文档定位">一、文档定位</a></li><li><a href="#二-项目背景">二、项目背景</a></li><li><a href="#三-原始需求台账-r1-r11">三、原始需求台账（R1–R11）</a></li><li><a href="#四-功能需求">四、功能需求</a></li><li><a href="#五-非功能需求">五、非功能需求</a></li><li><a href="#六-数据需求">六、数据需求</a></li><li><a href="#七-接口需求">七、接口需求</a></li><li><a href="#八-约束与边界">八、约束与边界</a></li><li><a href="#九-验收标准">九、验收标准</a></li><li><a href="#十-已知遗留与后续计划">十、已知遗留与后续计划</a></li><li><a href="#十一-需求追踪矩阵">十一、需求追踪矩阵</a></li><li><a href="#十二-附录">十二、附录</a></li></ol></div><h2 id="一-文档定位">一、文档定位</h2>
+<p>本文是本项目<strong>需求的唯一权威来源</strong>，回答三个问题：</p>
+<ol><li><strong>为什么</strong>要做这个东西（背景与痛点）</li><li><strong>要做到什么程度</strong>（R1–R11 需求台账 + 功能/非功能/数据/接口需求）</li><li><strong>做到了没有</strong>（验收标准）</li></ol>
+<p>任何与本文冲突的表述以本文为准；实现细节请看《技术路径》，操作步骤请看《使用教程》，交接与运维请看《生产交接文档》。</p>
+<p><strong>读者对象</strong>：产品/需求负责人、开发维护人员、接手运维的人。</p>
+<hr>
+<h2 id="二-项目背景">二、项目背景</h2>
+<h3>2.1 场景</h3>
+<p>学校使用<strong>云高（广州云糕科技）统一认证</strong>的校园网。典型形态：</p>
+<ul><li>电脑接入校园网后，需访问认证网关 <code>hgs.auth.yungao-tech.com:1110</code> 完成认证才能上网。</li><li>认证凭据是一枚 <code>Authorization: Bearer &lt;Token&gt;</code>，<strong>服务端只认这枚 Token</strong>。</li><li>网页登录流程是：打开认证页 → 拿到一次性 <code>code</code> → 带 Token 请求 <code>/api/network/auth?str=&lt;code&gt;</code> → 授权落到某台设备。</li></ul>
+<h3>2.2 痛点</h3>
+<table><thead><tr>
+<th>编号</th>
+<th>痛点</th>
+<th>具体表现</th>
+</tr></thead><tbody>
+<tr>
+<td>P1</td>
+<td><strong>扫码很麻烦</strong></td>
+<td>每次重连都要掏手机打开 APP 扫一次码</td>
+</tr>
+<tr>
+<td>P2</td>
+<td><strong>扫码只有一次有效</strong></td>
+<td>扫码换来的 Token 是<strong>单次使用</strong>的，断了还得再扫</td>
+</tr>
+<tr>
+<td>P3</td>
+<td><strong>每次开机都要手动认证</strong></td>
+<td>开机后电脑不能自动联网</td>
+</tr>
+<tr>
+<td>P4</td>
+<td><strong>断了不会自动恢复</strong></td>
+<td>网络抖动/换宿舍后必须人工介入</td>
+</tr>
+<tr>
+<td>P5</td>
+<td><strong>单设备套餐互踢</strong></td>
+<td>电脑上认证会把手机顶下线；手机重连又把电脑顶下线，形成&quot;抢登录&quot;死循环</td>
+</tr>
+<tr>
+<td>P6</td>
+<td><strong>想两台同时用做不到</strong></td>
+<td>套餐只允许 1 台设备在线，电脑与手机无法共存</td>
+</tr>
+<tr>
+<td>P7</td>
+<td><strong>Token 会失效</strong></td>
+<td>在 APP 内退出账号、或发生设备登录后，Token 立刻失效，工具变砖</td>
+</tr>
+<tr>
+<td>P8</td>
+<td><strong>分发受阻</strong></td>
+<td>未签名的 exe 在第二台电脑上被杀毒软件拦截（下载 + 运行双拦）</td>
+</tr>
+</tbody></table>
+<h3>2.3 核心技术洞察</h3>
+<p>云高把「<strong>身份</strong>」和「<strong>这次授权给哪台设备</strong>」拆成了两件事：</p>
+<ul><li>身份 = 请求头里的 <code>Bearer Token</code>（服务端唯一认定）</li><li>授权载体 = 一次性的 <code>code</code> / <code>str</code>（网页流程里传参用）</li></ul>
+<p>因此 <code>GET /api/network/auth?ip=&lt;设备IP&gt;</code> 配合一枚有效 Token 就能<strong>跳过整个扫码流程</strong>直接认证。这是「免手机」的全部技术依据。</p>
+<p>而 Token 的续命方式又被逆向出来了：<code>POST https://user.v4.yungao-tech.com/api/login</code>，body 为 <code>{&quot;mobile&quot;,&quot;password&quot;}</code>，直接换回 Token。<strong>这让&quot;完全自愈&quot;成为可能</strong>——断网后不需要任何人工介入。</p>
+<hr>
+<h2 id="三-原始需求台账-r1-r11">三、原始需求台账（R1–R11）</h2>
+<blockquote><p>逐条还原用户诉求，标注实现状态与落地位置。状态含义：<strong>已实现</strong> = 代码可运行且已验证；<strong>改造中</strong> = 方案已定、待落地。</p></blockquote>
+<table><thead><tr>
+<th>编号</th>
+<th>需求陈述</th>
+<th>状态</th>
+<th>落地位置</th>
+</tr></thead><tbody>
+<tr>
+<td><strong>R1</strong></td>
+<td>每次开机都能自动登录，不用手动点</td>
+<td>已实现</td>
+<td><code>main.py</code> <code>_startup_checks()</code> → <code>_delayed_login(8)</code>；自启由 <code>HKCU\...\CurrentVersion\Run</code> 写入（<code>main.py</code> <code>_apply_autostart</code>）</td>
+</tr>
+<tr>
+<td><strong>R2</strong></td>
+<td>断开网络连接后能自动重新连接</td>
+<td>已实现</td>
+<td><code>netguard.py</code> <code>NetGuard</code>：20s 周期探测 + 断线重连循环 <code>15/30/60/120s</code> 指数退避</td>
+</tr>
+<tr>
+<td><strong>R3</strong></td>
+<td>电脑认证<strong>不挤掉</strong>手机，手机也能正常用</td>
+<td>已实现</td>
+<td><code>auth.py</code> <code>login_chain()</code> 第 0 步「共享模式」：本机出口 IP 已在服务端在线列表中则直接判成功，绝不执行 logout；<code>is_nat_mode()</code> 识别手机热点</td>
+</tr>
+<tr>
+<td><strong>R4</strong></td>
+<td>手机断开后，电脑能<strong>主动</strong>接管网络</td>
+<td>已实现</td>
+<td><code>main.py</code> <code>_do_takeover()</code> → <code>login_chain(takeover=True)</code>：先 logout 占用设备再认证本机</td>
+</tr>
+<tr>
+<td><strong>R5</strong></td>
+<td>完全免抓包，不用再掏手机</td>
+<td>已实现</td>
+<td><code>acclogin.py</code> <code>AccountLogin</code>：手机号+密码换 Token；设置面板「登录并保存」</td>
+</tr>
+<tr>
+<td><strong>R6</strong></td>
+<td>Token 失效能自动恢复，不变砖</td>
+<td>已实现</td>
+<td><code>auth.py</code> <code>login_chain_self_heal()</code>：L0 账号换 Token → L1 服务端下发新 Token 续存 → L2 降级扫码 → L3 重新抓包</td>
+</tr>
+<tr>
+<td><strong>R7</strong></td>
+<td>窗口能自由缩放，UI 要好看</td>
+<td>已实现</td>
+<td><code>main.py</code> <code>resizable(True, True)</code>、<code>minsize(860,560)</code>；<code>Pill</code>/<code>Dot</code> 自绘控件；暗色视觉体系 <code>BG #0f1116 / ACCENT #FB7299</code></td>
+</tr>
+<tr>
+<td><strong>R8</strong></td>
+<td>按钮不能重叠（用户截图反馈的缺陷）</td>
+<td>已实现</td>
+<td><code>main.py</code> <code>_build_actions()</code> <code>_relayout()</code>：按宽度自适应列数 + 游标推进 + 末行借位，6 种宽度实测 2 行零重叠</td>
+</tr>
+<tr>
+<td><strong>R9</strong></td>
+<td>配置文件夹不要直接放桌面，放 C 盘同名文件夹</td>
+<td><strong>改造中</strong></td>
+<td>计划统一为 <code>C:\GaoGaoNetAUTO\</code>（<code>config.json</code> / <code>config.json.bak</code> / <code>assets/</code> / <code>qr_tmp.png</code> / <code>logs/</code>），与 exe 位置解耦，旧配置自动迁移一次</td>
+</tr>
+<tr>
+<td><strong>R10</strong></td>
+<td>第二台电脑不能被杀毒软件拦截（下载 + 运行双拦）</td>
+<td><strong>改造中</strong></td>
+<td>计划：onedir zip 为交付主形态、<code>--noupx</code> 去壳、<code>--version-file</code> 版本资源、自签名证书 + 目标机导入 <code>.cer</code>、<code>docs/Defender-误报排查.md</code></td>
+</tr>
+<tr>
+<td><strong>R11</strong></td>
+<td>开机自启实现方式不能被杀毒软件判为高危行为</td>
+<td><strong>改造中</strong></td>
+<td>计划：由写 <code>HKCU\...\CurrentVersion\Run</code> 改为写<strong>启动文件夹 <code>.cmd</code></strong>（纯文件操作，Defender 行为规则基本不覆盖），托盘菜单提供开关</td>
+</tr>
+</tbody></table>
+<h3>3.1 需求演进备注</h3>
+<ul><li>R3/R4 是在用户实际反馈「<strong>手机和电脑还是会抢登录</strong>」「<strong>手机断开电脑网络后电脑无法主动接管</strong>」后追加的，一期只做了基础认证链。</li><li>R9 是在用户明确「<strong>配置文件夹不要直接放在桌面 放在 C 盘同名文件夹下面</strong>」后追加的。</li><li>R10/R11 是在用户明确「<strong>第二台电脑上面会杀毒软件拦截无法正常下载</strong>」后追加的。</li></ul>
+<hr>
+<h2 id="四-功能需求">四、功能需求</h2>
+<h3>4.1 认证模块（<code>auth.py</code>）</h3>
+<table><thead><tr>
+<th>编号</th>
+<th>功能</th>
+<th>输入</th>
+<th>输出</th>
+<th>异常路径</th>
+</tr></thead><tbody>
+<tr>
+<td>F-1</td>
+<td>本机出口 IP 探测</td>
+<td>认证网关 host/port</td>
+<td>本机出口 IP 字符串</td>
+<td>UDP connect 失败 → <code>_fallback_ip()</code> 遍历网卡</td>
+</tr>
+<tr>
+<td>F-2</td>
+<td>网关/默认路由探测</td>
+<td>系统信息</td>
+<td>默认网关</td>
+<td><code>ipconfig /all</code> 解析失败 → 返回空</td>
+</tr>
+<tr>
+<td>F-3</td>
+<td>NAT 模式判定</td>
+<td>出口 IP</td>
+<td>是否处于 NAT 之后</td>
+<td>私有段兜底判定</td>
+</tr>
+<tr>
+<td>F-4</td>
+<td>MAC 地址获取</td>
+<td>系统信息</td>
+<td><code>xx:xx:xx:xx:xx:xx</code></td>
+<td><code>ipconfig</code> 解析失败 → <code>_mac_fallback()</code> 用 <code>uuid.getnode()</code></td>
+</tr>
+<tr>
+<td>F-5</td>
+<td>免扫码认证</td>
+<td>IP + Token</td>
+<td><code>AuthResult</code></td>
+<td>401/403/410 → TOKEN_INVALID；409 → DEVICE_LIMIT；返回 HTML → NOT_AUTH；重定向到外部站点 → NOT_AUTH</td>
+</tr>
+<tr>
+<td>F-6</td>
+<td>扫码末跳认证</td>
+<td><code>str</code> + Token</td>
+<td><code>AuthResult</code></td>
+<td>同 F-5</td>
+</tr>
+<tr>
+<td>F-7</td>
+<td>下线某设备</td>
+<td>IP + Token</td>
+<td><code>AuthResult</code></td>
+<td>失败仅记日志，不中断主流程</td>
+</tr>
+<tr>
+<td>F-8</td>
+<td>查询在线设备列表</td>
+<td>Token</td>
+<td><code>[{ip, type}]</code></td>
+<td>解析失败 → 返回空列表（不阻断认证）</td>
+</tr>
+<tr>
+<td>F-9</td>
+<td>查询单 IP 在线状态</td>
+<td>IP + Token</td>
+<td>bool</td>
+<td>解析失败 → False</td>
+</tr>
+<tr>
+<td>F-10</td>
+<td>Token 健康检查</td>
+<td>IP + Token</td>
+<td><code>AuthResult</code>（不改变在线状态）</td>
+<td>同 F-5</td>
+</tr>
+<tr>
+<td>F-11</td>
+<td>设备列表人话化</td>
+<td>在线设备 + 本机 IP</td>
+<td>`手机 WIFI 10.1.2.3 \</td>
+<td>电脑有线 10.1.2.4（本机）`</td>
+<td>空列表 → &quot;当前无在线设备&quot;</td>
+</tr>
+<tr>
+<td>F-12</td>
+<td>服务端下发新 Token 提取</td>
+<td>响应体/响应头</td>
+<td>新 Token</td>
+<td>未找到 → None（退回旧 Token）</td>
+</tr>
+</tbody></table>
+<h3>4.2 认证链（<code>login_chain</code>，四级 + 共享前置）</h3>
+<table><thead><tr>
+<th>顺序</th>
+<th>阶段</th>
+<th>条件</th>
+<th>说明</th>
+</tr></thead><tbody>
+<tr>
+<td>0</td>
+<td><strong>共享模式</strong></td>
+<td>本机出口 IP 在服务端在线列表中</td>
+<td>直接判成功，<strong>绝不 logout</strong>，这是&quot;不挤手机&quot;的根因</td>
+</tr>
+<tr>
+<td>1</td>
+<td>直连</td>
+<td>—</td>
+<td><code>auth?ip=</code></td>
+</tr>
+<tr>
+<td>2</td>
+<td>清理陈旧会话</td>
+<td>直连失败</td>
+<td>先 <code>logout</code> 本机 IP，再 <code>auth?ip=</code></td>
+</tr>
+<tr>
+<td>3</td>
+<td><strong>自动抢占</strong></td>
+<td>仅 <code>takeover=True</code></td>
+<td>逐个 logout 其它在线设备，再认证本机</td>
+</tr>
+<tr>
+<td>4</td>
+<td>顶替指定手机 IP</td>
+<td><code>kick_phone</code> 且已填 <code>phone_ip</code></td>
+<td>logout 手机 IP 后认证</td>
+</tr>
+<tr>
+<td>5</td>
+<td>明确归因</td>
+<td>全部失败</td>
+<td>按 TOKEN_INVALID / DEVICE_LIMIT / NOT_AUTH 分别给出可操作提示</td>
+</tr>
+</tbody></table>
+<blockquote><p><strong><code>takeover</code> 语义（关键设计）</strong>：<code>takeover=True</code> 仅用于<strong>用户主动点击</strong>（「立即认证」/「抢占上线」）；自动重连一律传 <code>takeover=False</code>。否则守护线程会与手机 APP 互踢，形成无限循环。</p></blockquote>
+<h3>4.3 自愈模块（<code>login_chain_self_heal</code>）</h3>
+<table><thead><tr>
+<th>层级</th>
+<th>触发条件</th>
+<th>动作</th>
+<th>依赖</th>
+</tr></thead><tbody>
+<tr>
+<td><strong>L0</strong></td>
+<td>认证失败且判定 TOKEN_INVALID，且已配置账号密码</td>
+<td><code>POST /api/login</code> 换新 Token → 重跑认证链</td>
+<td><code>acclogin.py</code></td>
+</tr>
+<tr>
+<td><strong>L1</strong></td>
+<td>认证过程中服务端在响应体/响应头下发了新 Token</td>
+<td>提取并自动续存到配置（<code>token_prev</code> 备份旧值）</td>
+<td><code>auth.py</code> <code>_extract_new_token</code></td>
+</tr>
+<tr>
+<td><strong>L2</strong></td>
+<td>Token 确实拿不到，但用户在场</td>
+<td>降级到扫码登录（本地渲染二维码，无需 APP 页面）</td>
+<td><code>qrflow.py</code></td>
+</tr>
+<tr>
+<td><strong>L3</strong></td>
+<td>以上全失败</td>
+<td>提示重新抓包（设置面板「怎么获取？」有图文步骤）</td>
+<td>—</td>
+</tr>
+</tbody></table>
+<h3>4.4 守护模块（<code>netguard.py</code>）</h3>
+<table><thead><tr>
+<th>功能</th>
+<th>细节</th>
+</tr></thead><tbody>
+<tr>
+<td>连通性探测</td>
+<td>TCP connect 探测 <code>223.5.5.5:53</code> / <code>119.29.29.29:53</code> / <code>1.1.1.1:443</code> / <code>114.114.114.114:80</code>，任一通即算在线；<strong>不发应用层流量</strong></td>
+</tr>
+<tr>
+<td>探测周期</td>
+<td>20s（<code>interval</code>）</td>
+</tr>
+<tr>
+<td>启动延迟</td>
+<td>守护线程启动后先 <code>sleep(3)</code>，避免与开机自启抢网络</td>
+</tr>
+<tr>
+<td>断网判定</td>
+<td>连续 <strong>2 次</strong> 探测失败才上报，避免瞬时抖动误触发</td>
+</tr>
+<tr>
+<td>出口 IP 漂移</td>
+<td>检测到本机出口 IP 变化即上报 <code>ip_changed</code>（校园网重分配地址后旧授权失效）</td>
+</tr>
+<tr>
+<td>重连退避</td>
+<td>15s → 30s → 60s → 120s 封顶（<code>retry_base=15, retry_max=120</code>）</td>
+</tr>
+<tr>
+<td>重连不抢占</td>
+<td>重连流程只做<strong>非抢占式</strong>认证，避免与手机互踢</td>
+</tr>
+</tbody></table>
+<h3>4.5 扫码模块（<code>qrflow.py</code>）</h3>
+<table><thead><tr>
+<th>功能</th>
+<th>细节</th>
+</tr></thead><tbody>
+<tr>
+<td>会话建立</td>
+<td><code>GET /web/network/code?...&amp;clientip=&amp;clientmac=&amp;wlanacname=</code> → 解析页面</td>
+</tr>
+<tr>
+<td>二维码本地渲染</td>
+<td>XOR 解混淆 <code>encoded[]</code> + 每会话随机 <code>key</code> → 解出载荷 → <code>segno</code> 本地生成 PNG，<strong>不依赖 APP 页面</strong></td>
+</tr>
+<tr>
+<td>载荷等价性</td>
+<td>解码结果与 cookie <code>str</code> 完全一致</td>
+</tr>
+<tr>
+<td>过期判定</td>
+<td>用<strong>本地计时</strong>：<code>_created_at + SESSION_TTL_MINUTES*60</code>（10 分钟）。<strong>不能</strong>用「UUID 变了 = 过期」判断——服务端每次请求 <code>/web/network/code</code> 都会下发新 <code>str</code></td>
+</tr>
+<tr>
+<td>会话固定</td>
+<td><code>_session_cookie</code> 固定保存原始 UUID，防止轮询时重拉页面覆盖 cookie</td>
+</tr>
+<tr>
+<td>轮询</td>
+<td>定时 <code>poll()</code> 拉授权状态</td>
+</tr>
+</tbody></table>
+<h3>4.6 账号密码模块（<code>acclogin.py</code>）</h3>
+<table><thead><tr>
+<th>功能</th>
+<th>细节</th>
+</tr></thead><tbody>
+<tr>
+<td>接口</td>
+<td><code>POST https://user.v4.yungao-tech.com/api/login</code>，body <code>{&quot;mobile&quot;,&quot;password&quot;}</code></td>
+</tr>
+<tr>
+<td>必需字段</td>
+<td>仅 <code>mobile</code> + <code>password</code> 两个；换别的键名 → 400「参数不能为空」</td>
+</tr>
+<tr>
+<td>Token 提取</td>
+<td><code>_pick_token()</code> 递归查找 <code>token/accessToken/access_token/idToken/id_token/jwt/authorization/userToken/user_token/authToken</code>，再兜底匹配 JWT 形态（长度 &gt; 40 且含 2 个 <code>.</code>）</td>
+</tr>
+<tr>
+<td>错误分类</td>
+<td>400 参数不匹配 / 408 手机号不合法 / 401 账号不存在 / 401 密码错误 / 需验证码 / 需短信</td>
+</tr>
+<tr>
+<td>脱敏</td>
+<td><code>mask_mobile()</code> → <code>131****2536</code>，日志只显示脱敏形式</td>
+</tr>
+<tr>
+<td>明文口令</td>
+<td>口令<strong>不落盘明文</strong>，<code>account_password</code> 与 Token 同方案加密</td>
+</tr>
+</tbody></table>
+<h3>4.7 配置模块（<code>config.py</code>）</h3>
+<table><thead><tr>
+<th>功能</th>
+<th>细节</th>
+</tr></thead><tbody>
+<tr>
+<td>存储位置</td>
+<td><strong>改造后</strong>统一 <code>C:\GaoGaoNetAUTO\config.json</code>（可用环境变量 <code>GAOGAO_DATA_DIR</code> 覆盖）</td>
+</tr>
+<tr>
+<td>加密方案</td>
+<td>机器指纹 → SHA-256 派生加密密钥与 MAC 密钥 → SHA-256 计数器流（keystream）XOR → HMAC-SHA256 截断 16 字节做完整性校验 → <code>v1:&lt;base64&gt;</code></td>
+</tr>
+<tr>
+<td>密钥种子</td>
+<td>Windows 读 <code>HKLM\SOFTWARE\Microsoft\Cryptography\MachineGuid</code>；失败退化为 `node</td>
+<td>machine</td>
+<td>login`</td>
+</tr>
+<tr>
+<td>向后兼容</td>
+<td><code>decrypt_token()</code> 兼容手工填写的<strong>明文</strong> Token（非 <code>v1:</code> 前缀直接原样返回）</td>
+</tr>
+<tr>
+<td>自动备份</td>
+<td>每次 <code>save()</code> 后写 <code>config_backup/config-&lt;时间戳&gt;.json</code>，保留最近 3 份（改造后收敛为 1 份 <code>config.json.bak</code>）</td>
+</tr>
+<tr>
+<td>账号密码</td>
+<td><code>account_mobile</code> 明文存储；<code>account_password</code> 加密存储</td>
+</tr>
+</tbody></table>
+<h3>4.8 界面模块（<code>main.py</code>）</h3>
+<table><thead><tr>
+<th>功能</th>
+<th>细节</th>
+</tr></thead><tbody>
+<tr>
+<td>窗口</td>
+<td>可自由缩放，<code>minsize(860,560)</code>，初始 <code>1020x720</code></td>
+</tr>
+<tr>
+<td>视觉体系</td>
+<td><code>BG #0f1116</code> / <code>CARD #191c25</code> / <code>ACCENT #FB7299</code> / <code>OK_C #3ddc97</code> / <code>WARN_C #f5c451</code> / <code>ERR_C #ff6b81</code> + <code>*_DIM</code> 弱背景 + <code>_mix()</code> 颜色混合</td>
+</tr>
+<tr>
+<td>自绘控件</td>
+<td><code>Pill</code>（Canvas 圆角按钮，支持 accent/ghost/solid/quiet 四种 style、顶部高光、按压反馈、图标）、<code>Dot</code>（光晕状态灯）</td>
+</tr>
+<tr>
+<td>操作按钮（6 个）</td>
+<td>立即认证 / 扫码登录 / 抢占上线 / 在线设备 / 归还名额 / 检查 Token</td>
+</tr>
+<tr>
+<td>按钮自适应</td>
+<td><code>_relayout()</code>：宽度 ≥540 → 3 列，≥360 → 2 列，否则 1 列；末行只剩 1 个时「借一个下来」</td>
+</tr>
+<tr>
+<td>设置面板</td>
+<td>右侧 <code>Canvas + Scrollbar</code> 可滚动，避免内容被裁掉</td>
+</tr>
+<tr>
+<td>状态卡</td>
+<td>显示当前 IP / Token 状态 / <strong>自愈状态条（三态配色）</strong> / <strong>在线设备一行摘要</strong></td>
+</tr>
+<tr>
+<td>日志区</td>
+<td>实时滚动输出，可清空</td>
+</tr>
+<tr>
+<td>托盘</td>
+<td><code>pystray</code> 图标 + 菜单（显示主窗口 / 立即认证 / 退出）；<code>pystray</code>/<code>Pillow</code> 缺失时静默跳过并记日志</td>
+</tr>
+<tr>
+<td>关闭行为</td>
+<td>关闭窗口时若有未保存输入会弹窗确认</td>
+</tr>
+</tbody></table>
+<hr>
+<h2 id="五-非功能需求">五、非功能需求</h2>
+<table><thead><tr>
+<th>维度</th>
+<th>要求</th>
+<th>落地方式</th>
+</tr></thead><tbody>
+<tr>
+<td><strong>可靠性</strong></td>
+<td>断网后必须能自己爬起来</td>
+<td>守护线程 + 指数退避；认证链多级兜底；连续 2 次失败才判定断网</td>
+</tr>
+<tr>
+<td><strong>可靠性</strong></td>
+<td>不得与手机 APP 互踢死循环</td>
+<td><code>takeover</code> 参数严格区分主动/自动；重连路径永不抢占</td>
+</tr>
+<tr>
+<td><strong>可靠性</strong></td>
+<td>不得误判已在线设备</td>
+<td>共享模式先查在线列表再决定是否 logout</td>
+</tr>
+<tr>
+<td><strong>安全性</strong></td>
+<td>Token 不以明文落盘</td>
+<td>指纹派生密钥 + XOR 流加密 + HMAC 校验</td>
+</tr>
+<tr>
+<td><strong>安全性</strong></td>
+<td>日志不泄漏凭据</td>
+<td>手机号脱敏；Token 不进日志；错误提示不含 Token</td>
+</tr>
+<tr>
+<td><strong>安全性</strong></td>
+<td>不做设备唯一标识采集</td>
+<td>改造后取消 MachineGuid 读取（保留双密钥兼容以不丢老配置）</td>
+</tr>
+<tr>
+<td><strong>兼容性</strong></td>
+<td>Win10 / Win11 x64</td>
+<td>tkinter + requests，零额外运行时依赖</td>
+</tr>
+<tr>
+<td><strong>兼容性</strong></td>
+<td>三种分发形态可用</td>
+<td>onedir zip / onefile exe / 源码绿色包</td>
+</tr>
+<tr>
+<td><strong>可维护性</strong></td>
+<td>模块职责单一</td>
+<td>认证 <code>auth</code> / 配置 <code>config</code> / 守护 <code>netguard</code> / 扫码 <code>qrflow</code> / 账号 <code>acclogin</code> / UI <code>main</code> 分离</td>
+</tr>
+<tr>
+<td><strong>可维护性</strong></td>
+<td>不依赖第三方 Markdown 库</td>
+<td><code>docs/build_html.py</code> 纯标准库实现</td>
+</tr>
+<tr>
+<td><strong>可交付性</strong></td>
+<td>不被杀毒软件拦截</td>
+<td>改造后：onedir + 无 UPX + 版本资源 + 自签名 + 无子进程 + 无注册表 Run</td>
+</tr>
+<tr>
+<td><strong>可诊断性</strong></td>
+<td>出问题能自证</td>
+<td>自愈状态条、在线设备摘要、实时日志、<code>login_check.py</code> / <code>tokenlab.py</code> 诊断脚本</td>
+</tr>
+</tbody></table>
+<hr>
+<h2 id="六-数据需求">六、数据需求</h2>
+<h3>6.1 配置项全表（<code>config.py</code> <code>DEFAULTS</code>）</h3>
+<table><thead><tr>
+<th>键</th>
+<th>类型</th>
+<th>默认值</th>
+<th>含义</th>
+<th>敏感级别</th>
+</tr></thead><tbody>
+<tr>
+<td><code>host</code></td>
+<td>str</td>
+<td><code>hgs.auth.yungao-tech.com</code></td>
+<td>认证网关主机（<strong>随校而异</strong>）</td>
+<td>低</td>
+</tr>
+<tr>
+<td><code>port</code></td>
+<td>int</td>
+<td><code>1110</code></td>
+<td>网关端口</td>
+<td>低</td>
+</tr>
+<tr>
+<td><code>scheme</code></td>
+<td>str</td>
+<td><code>http</code></td>
+<td>网关协议（明文 HTTP，校园网侧协议本身）</td>
+<td>低</td>
+</tr>
+<tr>
+<td><code>wlan_acname</code></td>
+<td>str</td>
+<td><code>Panabit</code></td>
+<td>接入点名称，用于拼 <code>/web/network/code</code> 查询参数</td>
+<td>低</td>
+</tr>
+<tr>
+<td><code>paip</code></td>
+<td>str</td>
+<td><code>&quot;&quot;</code></td>
+<td>接入点 IP（可空）</td>
+<td>低</td>
+</tr>
+<tr>
+<td><code>vlan</code></td>
+<td>str</td>
+<td><code>0.0</code></td>
+<td>VLAN 标识</td>
+<td>低</td>
+</tr>
+<tr>
+<td><code>phone_ip</code></td>
+<td>str</td>
+<td><code>&quot;&quot;</code></td>
+<td>被顶替的手机 IP（留空则不自动顶替）</td>
+<td>中</td>
+</tr>
+<tr>
+<td><code>token</code></td>
+<td>str(密文)</td>
+<td><code>&quot;&quot;</code></td>
+<td>当前 Bearer Token，加密存储</td>
+<td><strong>高</strong></td>
+</tr>
+<tr>
+<td><code>token_prev</code></td>
+<td>str(密文)</td>
+<td><code>&quot;&quot;</code></td>
+<td>上一版 Token，L1 续存失败时回退</td>
+<td><strong>高</strong></td>
+</tr>
+<tr>
+<td><code>account_mobile</code></td>
+<td>str</td>
+<td><code>&quot;&quot;</code></td>
+<td>云高账号手机号，<strong>明文</strong></td>
+<td>中</td>
+</tr>
+<tr>
+<td><code>account_password</code></td>
+<td>str(密文)</td>
+<td><code>&quot;&quot;</code></td>
+<td>云高账号密码，加密存储</td>
+<td><strong>高</strong></td>
+</tr>
+<tr>
+<td><code>autostart</code></td>
+<td>bool</td>
+<td><code>False</code></td>
+<td>开机自启开关</td>
+<td>低</td>
+</tr>
+<tr>
+<td><code>auto_kick_phone</code></td>
+<td>bool</td>
+<td><code>False</code></td>
+<td>是否自动顶替手机（默认关，避免困扰）</td>
+<td>低</td>
+</tr>
+<tr>
+<td><code>keep_token_alive</code></td>
+<td>bool</td>
+<td><code>True</code></td>
+<td>是否保持 Token 活跃</td>
+<td>低</td>
+</tr>
+<tr>
+<td><code>status_url</code></td>
+<td>str</td>
+<td><code>&quot;&quot;</code></td>
+<td>抓包发现的授权状态查询接口（可空）</td>
+<td>低</td>
+</tr>
+<tr>
+<td><code>complete_url</code></td>
+<td>str</td>
+<td><code>&quot;&quot;</code></td>
+<td>抓包发现的完成回调（可空）</td>
+<td>低</td>
+</tr>
+<tr>
+<td><code>code_page_url</code></td>
+<td>str</td>
+<td><code>&quot;&quot;</code></td>
+<td>抓包发现的认证页 URL（可空）</td>
+<td>低</td>
+</tr>
+<tr>
+<td><code>last_ip</code></td>
+<td>str</td>
+<td><code>&quot;&quot;</code></td>
+<td>上次成功认证时的出口 IP</td>
+<td>低</td>
+</tr>
+<tr>
+<td><code>last_auth_ok</code></td>
+<td>bool</td>
+<td><code>False</code></td>
+<td>上次认证是否成功</td>
+<td>低</td>
+</tr>
+</tbody></table>
+<h3>6.2 落盘文件</h3>
+<table><thead><tr>
+<th>文件</th>
+<th>位置（改造后）</th>
+<th>内容</th>
+</tr></thead><tbody>
+<tr>
+<td><code>config.json</code></td>
+<td><code>C:\GaoGaoNetAUTO\</code></td>
+<td>上述全部配置</td>
+</tr>
+<tr>
+<td><code>config.json.bak</code></td>
+<td><code>C:\GaoGaoNetAUTO\</code></td>
+<td>自动备份（改造后保留 1 份）</td>
+</tr>
+<tr>
+<td><code>config_backup/config-&lt;时间戳&gt;.json</code></td>
+<td>同级（改造前行为）</td>
+<td>自动备份，保留 3 份</td>
+</tr>
+<tr>
+<td><code>assets/icon.png</code> / <code>icon.ico</code></td>
+<td><code>C:\GaoGaoNetAUTO\assets\</code></td>
+<td>程序图标（<code>icons.py</code> 纯 Python 生成，不依赖 Pillow）</td>
+</tr>
+<tr>
+<td><code>qr_tmp.png</code></td>
+<td><code>C:\GaoGaoNetAUTO\</code></td>
+<td>扫码窗口临时二维码</td>
+</tr>
+<tr>
+<td><code>logs/</code></td>
+<td><code>C:\GaoGaoNetAUTO\logs\</code></td>
+<td>运行日志（改造项）</td>
+</tr>
+</tbody></table>
+<hr>
+<h2 id="七-接口需求">七、接口需求</h2>
+<h3>7.1 核心接口</h3>
+<table><thead><tr>
+<th>#</th>
+<th>方法</th>
+<th>路径</th>
+<th>关键参数</th>
+<th>用途</th>
+</tr></thead><tbody>
+<tr>
+<td>1</td>
+<td>GET</td>
+<td><code>/web/network/code</code></td>
+<td><code>clientip</code> <code>clientmac</code> <code>wlanacname</code> <code>paip</code> <code>vlan</code></td>
+<td>取会话与二维码载荷</td>
+</tr>
+<tr>
+<td>2</td>
+<td>GET</td>
+<td><code>/api/network/auth</code></td>
+<td><code>ip</code></td>
+<td><strong>免扫码认证主路径</strong></td>
+</tr>
+<tr>
+<td>3</td>
+<td>GET</td>
+<td><code>/api/network/auth</code></td>
+<td><code>str</code></td>
+<td>扫码末跳</td>
+</tr>
+<tr>
+<td>4</td>
+<td>GET</td>
+<td><code>/api/network/logout</code></td>
+<td><code>token</code> <code>ip</code></td>
+<td>下线某设备 / 归还名额</td>
+</tr>
+<tr>
+<td>5</td>
+<td>GET</td>
+<td><code>/api/network/online</code></td>
+<td>—</td>
+<td>在线设备列表 <code>[{ip, type}]</code></td>
+</tr>
+<tr>
+<td>6</td>
+<td>GET</td>
+<td><code>/api/network/onestatus</code></td>
+<td><code>ip</code></td>
+<td>查某 IP 是否在线</td>
+</tr>
+<tr>
+<td>7</td>
+<td>POST</td>
+<td><code>https://user.v4.yungao-tech.com/api/login</code></td>
+<td>body <code>{&quot;mobile&quot;,&quot;password&quot;}</code></td>
+<td>账号密码换 Token</td>
+</tr>
+</tbody></table>
+<p>所有网关请求头带 <code>Authorization: Bearer &lt;Token&gt;</code>；<code>User-Agent</code> 模拟浏览器。</p>
+<h3>7.2 <code>type</code> 字段语义（逆向自 APP）</h3>
+<table><thead><tr>
+<th>值</th>
+<th>含义</th>
+</tr></thead><tbody>
+<tr>
+<td>1</td>
+<td>手机 WIFI 使用中</td>
+</tr>
+<tr>
+<td>2</td>
+<td>电脑有线使用中</td>
+</tr>
+<tr>
+<td>3</td>
+<td>电脑 WIFI 使用中</td>
+</tr>
+</tbody></table>
+<h3>7.3 错误码语义</h3>
+<table><thead><tr>
+<th>码 / 特征</th>
+<th>分类</th>
+<th>含义</th>
+</tr></thead><tbody>
+<tr>
+<td>200 / <code>code=0</code> / <code>success=true</code></td>
+<td>OK</td>
+<td>成功</td>
+</tr>
+<tr>
+<td>401 / 403</td>
+<td>TOKEN_INVALID</td>
+<td>服务端拒绝该 Token</td>
+</tr>
+<tr>
+<td><strong>410</strong></td>
+<td>TOKEN_INVALID</td>
+<td>登录状态已失效（Token 过期 / 未认证 / 在别处登录）</td>
+</tr>
+<tr>
+<td><strong>409</strong></td>
+<td>DEVICE_LIMIT</td>
+<td>套餐只支持单设备，已有设备在线</td>
+</tr>
+<tr>
+<td>400</td>
+<td>未知</td>
+<td>参数不能为空 / 参数不匹配</td>
+</tr>
+<tr>
+<td>408</td>
+<td>—</td>
+<td>手机号不合法（账号密码登录）</td>
+</tr>
+<tr>
+<td>401（账号接口）</td>
+<td>—</td>
+<td>账号不存在 或 密码错误</td>
+</tr>
+<tr>
+<td>返回 HTML</td>
+<td>NOT_AUTH</td>
+<td>认证接口返回网页 → 未连校园网或被门户拦截</td>
+</tr>
+<tr>
+<td>被重定向</td>
+<td>NOT_AUTH</td>
+<td>请求被打到别的站点 → 同上</td>
+</tr>
+<tr>
+<td>700 / 701</td>
+<td>—</td>
+<td>APP 内提示 / 单设备弹窗文案</td>
+</tr>
+</tbody></table>
+<h3>7.4 服务端实测行为（重要）</h3>
+<table><thead><tr>
+<th>场景</th>
+<th>结果</th>
+</tr></thead><tbody>
+<tr>
+<td>无设备在线 → 认证 A</td>
+<td><strong>200</strong> 成功</td>
+</tr>
+<tr>
+<td>A 在线 → 认证 B</td>
+<td><strong>409</strong>（套餐单设备）</td>
+</tr>
+<tr>
+<td>A 在线 → 再次认证 A</td>
+<td><strong>409</strong>（幂等拒绝，已在线的 IP 也不放行）</td>
+</tr>
+<tr>
+<td>下线 A → 再认证 A</td>
+<td><strong>200</strong> 成功</td>
+</tr>
+<tr>
+<td><code>onestatus</code> 判定</td>
+<td>按 IP 段：<code>10.135.130.x</code> 整段在线，<code>1.2.3.4</code> 不在线</td>
+</tr>
+<tr>
+<td>抢占可行性</td>
+<td><code>logout 手机IP</code> → 200，<code>auth 电脑IP</code> → 200，<strong>接管无需手填手机 IP</strong></td>
+</tr>
+</tbody></table>
+<hr>
+<h2 id="八-约束与边界">八、约束与边界</h2>
+<table><thead><tr>
+<th>编号</th>
+<th>约束</th>
+<th>影响</th>
+</tr></thead><tbody>
+<tr>
+<td>C1</td>
+<td><strong>单设备套餐</strong></td>
+<td>电脑与手机默认互斥；共享模式与抢占是两条出路</td>
+</tr>
+<tr>
+<td>C2</td>
+<td>网关是<strong>明文 HTTP</strong>（端口 1110）</td>
+<td>协议本身决定，不能改；Defender 网络保护可能告警</td>
+</tr>
+<tr>
+<td>C3</td>
+<td>网关 host/port <strong>随校而异</strong></td>
+<td>必须做成配置项，不能写死</td>
+</tr>
+<tr>
+<td>C4</td>
+<td>Token <strong>绑定机器指纹加密</strong></td>
+<td>拷贝 <code>config.json</code> 到另一台机器解不出 Token → 多机部署应统一用账号密码</td>
+</tr>
+<tr>
+<td>C5</td>
+<td>扫码会话 <strong>10 分钟</strong>过期</td>
+<td>过期后需重新生成二维码</td>
+</tr>
+<tr>
+<td>C6</td>
+<td>账号密码登录接口<strong>未确认需要验证码/短信</strong></td>
+<td>若云高侧开启验证，L0 自愈会降级失败，需回退扫码</td>
+</tr>
+<tr>
+<td>C7</td>
+<td><code>pystray</code>/<code>Pillow</code> <strong>可选</strong></td>
+<td>缺失时托盘不生效，界面需能正常降级</td>
+</tr>
+<tr>
+<td>C8</td>
+<td>未签名 exe <strong>会被 Defender 拦</strong></td>
+<td>需自签名 + 排除项指引；根治需正规代码签名证书</td>
+</tr>
+</tbody></table>
+<hr>
+<h2 id="九-验收标准">九、验收标准</h2>
+<blockquote><p>Given-When-Then 简表。全部可在校园网环境实测。</p></blockquote>
+<table><thead><tr>
+<th>编号</th>
+<th>Given</th>
+<th>When</th>
+<th>Then</th>
+</tr></thead><tbody>
+<tr>
+<td>A1</td>
+<td>已配置账号密码、已连校园网</td>
+<td>点击「立即认证」</td>
+<td>显示认证成功，外网可访问；配置中记录新 Token</td>
+</tr>
+<tr>
+<td>A2</td>
+<td>开机且已开启自启</td>
+<td>系统启动</td>
+<td>约 8 秒后自动认证，无需人工点击</td>
+</tr>
+<tr>
+<td>A3</td>
+<td>已认证在线</td>
+<td>手动断开网线再接回</td>
+<td>守护线程在退避周期内自动恢复联网</td>
+</tr>
+<tr>
+<td>A4</td>
+<td>手机与电脑连<strong>同一热点</strong></td>
+<td>在电脑点「立即认证」</td>
+<td>判定为「共享模式」提示，<strong>手机不掉线</strong></td>
+</tr>
+<tr>
+<td>A5</td>
+<td>手机在线占名额</td>
+<td>在电脑点「抢占上线」</td>
+<td>手机被下线、电脑认证成功、界面提示接管</td>
+</tr>
+<tr>
+<td>A6</td>
+<td>手机在线占名额</td>
+<td>守护线程自动重连（<code>takeover=False</code>）</td>
+<td>电脑认证失败并提示，不主动踢手机（不产生互踢循环）</td>
+</tr>
+<tr>
+<td>A7</td>
+<td>Token 已失效</td>
+<td>触发任意认证</td>
+<td>自动用账号密码换新 Token 并重试成功，日志出现「★ 已用账号密码换取新 Token」</td>
+</tr>
+<tr>
+<td>A8</td>
+<td>未配置账号密码且 Token 失效</td>
+<td>触发认证</td>
+<td>明确提示「请配置账号密码或用扫码登录」，<strong>不静默失败</strong></td>
+</tr>
+<tr>
+<td>A9</td>
+<td>窗口宽度 300 / 400 / 600 / 800 / 1000 / 1400</td>
+<td>观察操作按钮区</td>
+<td>任意宽度下按钮<strong>零重叠</strong>，换行正常</td>
+</tr>
+<tr>
+<td>A10</td>
+<td>设置面板内容超出窗口高度</td>
+<td>打开设置面板</td>
+<td>可滚动滚动到底，「登录并保存」按钮可见可点</td>
+</tr>
+<tr>
+<td>A11</td>
+<td>关闭主窗口时输入了未保存内容</td>
+<td>点击关闭</td>
+<td>弹窗确认，避免误丢配置</td>
+</tr>
+<tr>
+<td>A12</td>
+<td>Token 已配置</td>
+<td>点击「检查 Token」</td>
+<td>返回 Token 是否被服务端接受的明确结论</td>
+</tr>
+<tr>
+<td>A13</td>
+<td>账号有多台在线设备</td>
+<td>点击「在线设备」</td>
+<td>弹出列表，标注设备类型与「（本机）」，可单台下线</td>
+</tr>
+<tr>
+<td>A14</td>
+<td>旧版本 <code>config.json</code>（exe 同目录）</td>
+<td>首次运行改造后的版本</td>
+<td>自动迁移到 <code>C:\GaoGaoNetAUTO\</code>，Token 可正常读出</td>
+</tr>
+<tr>
+<td>A15</td>
+<td>onedir zip 解压后</td>
+<td>双击 exe</td>
+<td>正常启动，配置写在 <code>C:\GaoGaoNetAUTO\</code>，exe 目录<strong>无任何写入</strong></td>
+</tr>
+<tr>
+<td>A16</td>
+<td>未签名/自签名 exe</td>
+<td>Defender 扫描</td>
+<td><code>MpCmdRun</code> 返回 0；界面提供「更多信息→仍要运行」指引</td>
+</tr>
+<tr>
+<td>A17</td>
+<td>配置目录不可写</td>
+<td>启动程序</td>
+<td>明确报错而非静默失败</td>
+</tr>
+<tr>
+<td>A18</td>
+<td><code>pystray</code> 未安装</td>
+<td>启动程序</td>
+<td>正常显示主窗口，日志提示已跳过托盘</td>
+</tr>
+</tbody></table>
+<hr>
+<h2 id="十-已知遗留与后续计划">十、已知遗留与后续计划</h2>
+<table><thead><tr>
+<th>编号</th>
+<th>事项</th>
+<th>影响</th>
+<th>优先级</th>
+<th>计划</th>
+</tr></thead><tbody>
+<tr>
+<td>L1</td>
+<td>真实账号下 <code>POST /api/login</code> 成功响应中 <strong>Token 的确切字段名</strong>未实测确认</td>
+<td><code>_pick_token()</code> 已做多命名兼容 + JWT 兜底，但未跑通真实账号</td>
+<td>高</td>
+<td>用真实账号跑 <code>python login_check.py &lt;手机号&gt; &lt;密码&gt;</code> 确认</td>
+</tr>
+<tr>
+<td>L2</td>
+<td>第二台电脑 Defender 双拦未实测</td>
+<td>改造方案已定，尚未在目标机验证</td>
+<td>高</td>
+<td>改造打包后在第二台机按 <code>docs/Defender-误报排查.md</code> 验证</td>
+</tr>
+<tr>
+<td>L3</td>
+<td>自签名 ≠ SmartScreen 放行</td>
+<td>仍需「更多信息→仍要运行」或排除项</td>
+<td>中</td>
+<td>后续采购 OV / Azure Trusted Signing 证书，根治</td>
+</tr>
+<tr>
+<td>L4</td>
+<td>无 CHANGELOG / 版本说明文件</td>
+<td>变更只能靠 git log</td>
+<td>中</td>
+<td>补 <code>CHANGELOG.md</code>，并把版本号接入 <code>version_info.txt</code></td>
+</tr>
+<tr>
+<td>L5</td>
+<td>网关为明文 HTTP</td>
+<td>Defender 网络保护可能告警</td>
+<td>低</td>
+<td>增加 HTTPS 探测开关（部分学校已支持 443）</td>
+</tr>
+<tr>
+<td>L6</td>
+<td>多网卡 / 多出口 IP 场景未验证</td>
+<td><code>detect_local_ip()</code> 已按路由择优，但极端场景未测</td>
+<td>低</td>
+<td>在多网卡机器上验证</td>
+</tr>
+<tr>
+<td>L7</td>
+<td>手机号明文存储</td>
+<td>中等风险</td>
+<td>低</td>
+<td>与 Token 一并加密（需同步改 <code>get_account</code>）</td>
+</tr>
+<tr>
+<td>L8</td>
+<td>精简版（无托盘）下关闭窗口会「消失」</td>
+<td>无托盘时点 X 无法唤回</td>
+<td>低</td>
+<td><code>_on_close()</code> 判空托盘时直接退出</td>
+</tr>
+</tbody></table>
+<hr>
+<h2 id="十一-需求追踪矩阵">十一、需求追踪矩阵</h2>
+<table><thead><tr>
+<th>需求</th>
+<th>实现文件</th>
+<th>关键函数</th>
+<th>验收项</th>
+</tr></thead><tbody>
+<tr>
+<td>R1 开机自启</td>
+<td><code>main.py</code></td>
+<td><code>_apply_autostart</code> / <code>_startup_checks</code> / <code>_delayed_login</code></td>
+<td>A2</td>
+</tr>
+<tr>
+<td>R2 断网重连</td>
+<td><code>netguard.py</code></td>
+<td><code>_tick</code> / <code>_reconnect_loop</code></td>
+<td>A3</td>
+</tr>
+<tr>
+<td>R3 不挤手机</td>
+<td><code>auth.py</code></td>
+<td><code>login_chain</code> 第 0 步 / <code>is_nat_mode</code></td>
+<td>A4</td>
+</tr>
+<tr>
+<td>R4 主动接管</td>
+<td><code>main.py</code> <code>auth.py</code></td>
+<td><code>_do_takeover</code> / <code>login_chain(takeover=True)</code></td>
+<td>A5 / A6</td>
+</tr>
+<tr>
+<td>R5 免抓包</td>
+<td><code>acclogin.py</code></td>
+<td><code>AccountLogin.login</code></td>
+<td>A1 / A8</td>
+</tr>
+<tr>
+<td>R6 Token 自愈</td>
+<td><code>auth.py</code></td>
+<td><code>login_chain_self_heal</code> / <code>_extract_new_token</code></td>
+<td>A7</td>
+</tr>
+<tr>
+<td>R7 UI 缩放美化</td>
+<td><code>main.py</code></td>
+<td><code>Pill</code> / <code>Dot</code> / 配色常量</td>
+<td>A9 / A10</td>
+</tr>
+<tr>
+<td>R8 按钮不重叠</td>
+<td><code>main.py</code></td>
+<td><code>_build_actions._relayout</code></td>
+<td>A9</td>
+</tr>
+<tr>
+<td>R9 C 盘配置目录</td>
+<td><code>config.py</code> <code>icons.py</code> <code>main.py</code></td>
+<td><code>data_dir()</code></td>
+<td>A14 / A15</td>
+</tr>
+<tr>
+<td>R10 杀软兼容</td>
+<td><code>build_exe.py</code> <code>tools/</code> <code>docs/</code></td>
+<td><code>--noupx</code> <code>--onedir</code> <code>sign_release.ps1</code></td>
+<td>A16</td>
+</tr>
+<tr>
+<td>R11 自启降权</td>
+<td><code>main.py</code></td>
+<td><code>_apply_autostart</code>（启动文件夹）</td>
+<td>A2</td>
+</tr>
+</tbody></table>
+<hr>
+<h2 id="十二-附录">十二、附录</h2>
+<h3>12.1 相关文档</h3>
+<table><thead><tr>
+<th>文档</th>
+<th>位置</th>
+</tr></thead><tbody>
+<tr>
+<td>使用教程</td>
+<td><code>docs/使用教程.md</code> / <code>.html</code></td>
+</tr>
+<tr>
+<td>技术路径</td>
+<td><code>docs/技术路径.md</code> / <code>.html</code></td>
+</tr>
+<tr>
+<td>生产交接文档</td>
+<td><code>docs/生产交接文档.md</code> / <code>.html</code></td>
+</tr>
+<tr>
+<td>构建与发布说明</td>
+<td>文档包内 <code>05-构建与发布说明.md</code></td>
+</tr>
+<tr>
+<td>项目说明（README）</td>
+<td><code>README.md</code> / <code>docs/README.html</code></td>
+</tr>
+</tbody></table>
+<h3>12.2 参考与许可</h3>
+<ul><li>协议语义逆向自开源项目 <code>JasonYANG170/GaoGaoNetAUTO</code>（Qt 版）的思路。</li><li>APP 逆向基于官方 APK（uni-app 明文 JS），仅用于理解接口语义。</li><li>本项目代码以 <strong>GPL-2.0</strong> 发布。</li></ul>
+</div>
+<script>
+(function(){
+  var h=document.querySelector('h1');
+  if(!h) return;
+  var b=document.createElement('div');
+  b.className='anchor';
+  b.innerHTML='<b>三十秒速览</b> &nbsp;下载 exe → 双击运行 → <b>先连上校园网</b> → 点「扫码登录」→ 用糕糕 APP 扫一下 → 立刻联网。'+
+    ' 想要以后彻底不掏手机，见下方「抓取 Token」一节。';
+  h.parentNode.insertBefore(b,h.nextSibling);
+  var t=document.querySelector('.toc');
+  if(t){ t.scrollIntoView({behavior:'smooth'}); }
+})();
+</script>
+</body>
+</html>
