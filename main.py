@@ -28,6 +28,13 @@ from config import Config, app_dir, data_dir
 from icons import ensure_icons
 from netguard import NetGuard
 from qrflow import QrAssistant
+from taskbar import (
+    activate_existing_instance,
+    acquire_single_instance,
+    release_single_instance,
+    set_app_user_model_id,
+    set_tool_window,
+)
 
 # ---------------------------------------------------------------- 主题
 #
@@ -299,6 +306,7 @@ class App:
         root.resizable(True, True)
         root.minsize(WIN_MIN_W, WIN_MIN_H)
         root.protocol("WM_DELETE_WINDOW", self._on_close)
+        self._apply_window_icon(root)
 
         # 顶部标题栏
         header = tk.Frame(root, bg=BG_GRAD, height=54)
@@ -1076,6 +1084,9 @@ class App:
         win.minsize(440, 340)
         win.resizable(True, True)
         win.transient(self.root)
+        # 不在任务栏另起按钮（否则多开一个窗口就多占一个位置）
+        set_tool_window(win)
+        self._apply_window_icon(win)
 
         head = tk.Frame(win, bg=BG_GRAD)
         head.pack(fill="x")
@@ -1218,6 +1229,8 @@ class App:
         win.resizable(False, False)
         win.geometry("400x520")
         win.protocol("WM_DELETE_WINDOW", self._close_qr)
+        set_tool_window(win)
+        self._apply_window_icon(win)
 
         tk.Label(win, text="用糕糕 APP 扫描二维码", bg=CARD, fg=TEXT,
                  font=(FONT, 13, "bold")).pack(pady=(22, 6))
@@ -1572,6 +1585,23 @@ class App:
             pass
         self.root.destroy()
 
+    def _apply_window_icon(self, win):
+        """给窗口设置应用图标（任务栏/标题栏不再显示 tkinter 默认图标）。"""
+        try:
+            png, ico = ensure_icons()
+            try:
+                img = tk.PhotoImage(file=str(png))
+                win.iconphoto(True, img)
+                self._icon_ref = img  # 防止被 GC 回收导致图标变白
+            except Exception:
+                pass
+            try:
+                win.iconbitmap(str(ico))
+            except Exception:
+                pass
+        except Exception:
+            pass
+
     def _drag_start(self, e):
         self._dx = e.x_root - self.root.winfo_x()
         self._dy = e.y_root - self.root.winfo_y()
@@ -1624,6 +1654,8 @@ class App:
         win.minsize(560, 480)
         win.resizable(True, True)
         win.transient(self.root)
+        set_tool_window(win)
+        self._apply_window_icon(win)
 
         # 顶栏
         top = tk.Frame(win, bg=BG_GRAD)
@@ -1718,14 +1750,38 @@ class App:
 
 def main() -> int:
     silent = "--silent" in sys.argv
+
+    # 任务栏占用控制：
+    # 1) 独立 AppUserModelID —— 任务栏图标独立分组，不和宿主进程混一起
+    set_app_user_model_id()
+    # 2) 单实例锁 —— 重复启动时不再多出一个托盘图标，
+    #    改为把已有实例的窗口顶到前台后退出
+    if not acquire_single_instance():
+        # 只有「用户手动双击」才唤起窗口；
+        # 开机自启（--silent）撞上已在跑的实例时保持安静，
+        # 否则会在用户没操作的情况下把窗口弹到前面。
+        if not silent:
+            # 手动双击：把已有实例的窗口唤到前台。
+            # 不弹 MessageBox —— 阻塞式弹窗反而更烦人，
+            # 而且窗口已经到前台了，提示是多余的。
+            activate_existing_instance()
+        return 0
+
     root = tk.Tk()
     root.withdraw()
     try:
         ensure_icons()
     except Exception:
         pass
-    app = App(root, silent=silent)
-    root.mainloop()
+    try:
+        app = App(root, silent=silent)
+    except Exception:
+        release_single_instance()
+        raise
+    try:
+        root.mainloop()
+    finally:
+        release_single_instance()
     return 0
 
 

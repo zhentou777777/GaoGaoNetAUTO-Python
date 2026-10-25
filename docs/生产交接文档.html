@@ -157,8 +157,8 @@ tr:nth-child(even) td{background:rgba(255,255,255,.015)}
 <tr>
 <td><code>GaoGaoNetAUTO-v1.0.0-免安装.zip</code></td>
 <td>v1.0.0</td>
-<td>17.61 MB</td>
-<td><code>337dcf53f89e2daff119f31c0af11557</code></td>
+<td>17.62 MB</td>
+<td><code>cf8d40912a6ba00279e4c0ff646c7855</code></td>
 <td><strong>目录版（Defender 误报最低，主推）</strong></td>
 <td>解压后双击 <code>GaoGaoNetAUTO.exe</code></td>
 </tr>
@@ -166,15 +166,15 @@ tr:nth-child(even) td{background:rgba(255,255,255,.015)}
 <td><code>GaoGaoNetAUTO-v1.0.0-单文件.zip</code></td>
 <td>v1.0.0</td>
 <td>17.39 MB</td>
-<td><code>0b9db6b461e4fea2761da8699eb5a422</code></td>
+<td><code>dc396b6dcc899f233ef586d4a2611b2f</code></td>
 <td>单文件版，便于分发（自解压，误报率略高）</td>
 <td>任意目录</td>
 </tr>
 <tr>
 <td><code>GaoGaoNetAUTO-v1.0.0-源码绿色包.zip</code></td>
 <td>v1.0.0</td>
-<td>0.23 MB</td>
-<td><code>b33c2b4cb3f28c754dc918ff3705387b</code></td>
+<td>0.24 MB</td>
+<td><code>585ec633d72e60fb0c2f300c02a70f7e</code></td>
 <td>源码绿色包（需自行装 Python）</td>
 <td>解压后 <code>setup.bat</code> → <code>run.bat</code></td>
 </tr>
@@ -403,7 +403,46 @@ tr:nth-child(even) td{background:rgba(255,255,255,.015)}
 </tr>
 </tbody></table>
 <p>状态卡上会实时显示：<strong>本机出口 IP</strong>、<strong>Token 状态</strong>、<strong>自愈状态条</strong>、<strong>在线设备摘要</strong>。</p>
-<p>托盘图标（需要 <code>pystray</code>）右键菜单：<strong>显示主窗口 / 立即认证 / 退出</strong>。</p>
+<p>托盘图标（需要 <code>pystray</code>）右键菜单：<strong>显示主窗口 / 立即认证 / 开机自启 / 退出</strong>。</p>
+<h3>1.5.1 任务栏占用控制</h3>
+<p>程序<strong>只占系统托盘一个位置</strong>，不会在任务栏上散落一堆图标：</p>
+<table><thead><tr>
+<th>场景</th>
+<th>表现</th>
+<th>实现</th>
+</tr></thead><tbody>
+<tr>
+<td>重复双击 exe</td>
+<td>只弹一次，第二次直接把已有窗口顶到前台后退出</td>
+<td><code>taskbar.py</code> 命名 Mutex 单实例锁（<code>Local\GaoGaoNetAUTO_SingleInstance_v1</code>）</td>
+</tr>
+<tr>
+<td>开机自启撞上已在跑的实例</td>
+<td>静默退出，<strong>不弹窗、不抢焦点</strong></td>
+<td><code>--silent</code> 分支跳过 <code>activate_existing_instance()</code></td>
+</tr>
+<tr>
+<td>静默模式运行</td>
+<td>主窗口 <code>withdraw</code>，任务栏无任何按钮</td>
+<td><code>App.__init__</code> 的 <code>silent</code> 分支</td>
+</tr>
+<tr>
+<td>扫码 / 在线设备 / Token 帮助窗口</td>
+<td>只作为主窗口的附属窗，<strong>不另起任务栏按钮</strong></td>
+<td><code>set_tool_window()</code> 设 <code>WS_EX_TOOLWINDOW</code></td>
+</tr>
+<tr>
+<td>任务栏图标分组</td>
+<td>独立分组，不和 python.exe 宿主混在一起</td>
+<td><code>SetCurrentProcessExplicitAppUserModelID</code></td>
+</tr>
+<tr>
+<td>标题栏 / 任务栏图标</td>
+<td>显示应用自己的图标，不是 tkinter 默认图标</td>
+<td><code>iconphoto</code> + <code>iconbitmap</code></td>
+</tr>
+</tbody></table>
+<blockquote><p>单实例锁是<strong>跨进程</strong>的（Windows 命名 Mutex），所以从任务栏、快捷方式、</p><p>启动文件夹 <code>.cmd</code> 各种方式启动都只会有一份在跑，托盘永远只有一个图标。</p></blockquote>
 <h3>1.6 开机自启</h3>
 <ul><li><strong>设置面板</strong>里有「开机自启」勾选框，勾上即生效。</li><li>实现方式：往<strong>启动文件夹</strong>写一个 <code>GaoGaoNetAUTO.cmd</code></li></ul>
 <p>（<code>%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup\</code>）。 选它而不是写注册表 Run 键，是因为后者容易被杀毒软件判为「可疑自启动」。</p>
@@ -463,6 +502,8 @@ Import-Certificate -FilePath .\GaoGaoNetAUTO.cer -CertStoreLocation Cert:\LocalM
 <p><strong>Q10：换电脑后 Token 失效？</strong> Token 用机器指纹加密，换机解不开，属预期。请在新机上重新配账号密码或扫码。</p>
 <p><strong>Q11：托盘图标没有？</strong> 未安装 <code>pystray</code> / <code>Pillow</code>。程序会正常显示主窗口，日志提示已跳过托盘。</p>
 <p><strong>Q12：程序在 <code>C:\Program Files\</code> 下能跑吗？</strong> 能。配置写在 <code>C:\GaoGaoNetAUTO\</code>，不需要 exe 目录可写。</p>
+<p><strong>Q13：任务栏/托盘里出现了好几个「糕糕校园网自动认证」图标？</strong> 那是<strong>旧版本</strong>没有单实例锁，多开了几个。新版（v1.0.0 起）带跨进程单实例锁， 无论从哪启动都只会有一份在跑，托盘只有一个图标。 把旧的实例全部退出（托盘图标右键 → 退出），再用新版本启动即可。</p>
+<p><strong>Q14：关掉主窗口后程序还在跑吗？</strong> 在。关窗口是「最小化到托盘」，守护线程继续工作； 托盘图标右键 → 退出 才真正结束进程。</p>
 <h3>1.11 卸载</h3>
 <ol><li>设置里取消「开机自启」（或手动删启动文件夹的 <code>GaoGaoNetAUTO.cmd</code>）。</li><li>删除 exe 与整个解压目录。</li><li>删除 <code>C:\GaoGaoNetAUTO\</code>（含 config.json 里的 Token 与账号密码）。</li><li>如导入过证书：<code>证书 → 受信任的根证书颁发机构</code> 删除 <code>GaoGaoNetAUTO</code>。</li></ol>
 <hr>
@@ -559,6 +600,18 @@ Import-Certificate -FilePath .\GaoGaoNetAUTO.cer -CertStoreLocation Cert:\LocalM
 <td><code>ensure_icons()</code></td>
 </tr>
 <tr>
+<td><code>netprobe_win.py</code></td>
+<td>~250</td>
+<td>纯 ctypes 调 <code>iphlpapi!GetAdaptersInfo</code> 采集网卡（不 spawn <code>ipconfig</code>）</td>
+<td><code>adapters()</code> / <code>mac_for_ip()</code> / <code>gateway_for_ip()</code></td>
+</tr>
+<tr>
+<td><code>taskbar.py</code></td>
+<td>~180</td>
+<td>任务栏占用控制：单实例锁 / 工具窗口样式 / AppUserModelID</td>
+<td><code>acquire_single_instance()</code> / <code>set_tool_window()</code></td>
+</tr>
+<tr>
 <td><code>capture.py</code></td>
 <td>208</td>
 <td>一次性逆向工具（playwright）抓认证页真实请求</td>
@@ -604,6 +657,9 @@ Import-Certificate -FilePath .\GaoGaoNetAUTO.cer -CertStoreLocation Cert:\LocalM
 <h3>2.3 运行流程</h3>
 <pre><code>启动
  │
+ ├─ 设置 AppUserModelID（任务栏独立分组）
+ ├─ 取单实例锁
+ │    └─ 已被占用 → 把已有窗口顶到前台（--silent 时静默退出）→ 结束
  ├─ 读配置 config.json（Token / 账号密码 / 开关）
  ├─ 初始化托盘（pystray 缺失则跳过）
  ├─ _startup_checks()
