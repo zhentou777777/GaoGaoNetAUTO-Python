@@ -134,10 +134,10 @@ class WebApp:
         """启动服务，返回实际端口。"""
         handler = _make_handler(self)
         try:
-            self._httpd = ThreadingHTTPServer((self.host, self.port), handler)
+            self._httpd = _QuietServer((self.host, self.port), handler)
         except OSError:
             # 端口被占用就换一个
-            self._httpd = ThreadingHTTPServer((self.host, 0), handler)
+            self._httpd = _QuietServer((self.host, 0), handler)
         self._httpd.daemon_threads = True
         self.port = self._httpd.server_address[1]
         self._thread = threading.Thread(target=self._httpd.serve_forever,
@@ -256,6 +256,32 @@ class WebApp:
 
 # ---------------------------------------------------------------- HTTP
 
+class _QuietServer(ThreadingHTTPServer):
+    """不往 stderr 刷异常 traceback 的 HTTP 服务器。
+
+    标准库默认的 ``handle_error`` 会把每个连接异常都打成一整段
+    traceback。浏览器刷新、切换标签、SSE 长连接被回收 —— 这些
+    都是**正常行为**，不该让用户看到「程序出错」。
+
+    真正的意外异常也不能吞掉 —— 记进日志文件，便于排查。
+    """
+
+    daemon_threads = True
+    allow_reuse_address = True
+
+    def handle_error(self, request, client_address):
+        exc = sys.exc_info()[1]
+        if isinstance(exc, (ConnectionResetError, ConnectionAbortedError,
+                            BrokenPipeError, TimeoutError)):
+            return  # 对端断开，正常
+        try:
+            import logs
+
+            logs.warn(f"Web 服务异常：{exc}")
+        except Exception:
+            pass
+
+
 def _make_handler(app: WebApp):
     class Handler(BaseHTTPRequestHandler):
         server_version = "GaoGaoWebUI"
@@ -263,6 +289,23 @@ def _make_handler(app: WebApp):
         protocol_version = "HTTP/1.1"
 
         # ---------------------------------------------------------- 工具
+
+        def handle_one_request(self):
+            """把「连接被对端断开」当正常情况，别刷 traceback。
+
+            浏览器刷新页面、切换标签、SSE 长连接被回收，都会让服务端
+            读到半截请求。标准库默认会往 stderr 打一整段
+            ``Exception occurred during processing of request``，
+            打包版虽然没有控制台，但这些噪音会混进日志文件，
+            也会让用户误以为程序出错。
+            """
+            try:
+                super().handle_one_request()
+            except (ConnectionResetError, ConnectionAbortedError,
+                    BrokenPipeError, TimeoutError):
+                self.close_connection = True
+            except OSError:
+                self.close_connection = True
 
         def log_message(self, fmt, *args):  # noqa: A003
             """不往 stderr 刷访问日志（会污染控制台和日志文件）。"""

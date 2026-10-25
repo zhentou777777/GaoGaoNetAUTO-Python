@@ -915,6 +915,25 @@ class TestWebUI:
         assert p is not None
         assert p.read_text(encoding="utf-8").strip() == server.url()
 
+    def test_client_disconnect_is_silent(self, server, capsys):
+        """浏览器刷新 / 切标签导致的连接中断，不该刷 traceback。
+
+        标准库默认会把每个连接异常打成一段 traceback，打包版虽然没有
+        控制台，但这些噪音会混进日志文件，也会让用户误以为程序出错。
+        """
+        import socket
+        import time
+
+        for _ in range(3):
+            s = socket.create_connection(("127.0.0.1", server.port), timeout=5)
+            s.sendall(b"GET / HTTP/1.1\r\nHost: x\r\n")  # 故意不完整
+            s.close()
+        time.sleep(0.4)
+
+        out = capsys.readouterr()
+        assert "Traceback" not in out.err, out.err
+        assert "Exception occurred" not in out.err, out.err
+
 
 class TestCoreController:
     """业务控制器（Web 与 Tk 共用的核心）。"""
