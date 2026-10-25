@@ -1,0 +1,78 @@
+name: Build Windows exe
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  build:
+    runs-on: windows-latest
+    # 发布 Release 需要写权限 —— 默认的只读 token 会 403。
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: 安装依赖
+        run: |
+          python -m pip install --upgrade pip
+          # 依赖版本已在 requirements.txt 里固定（含 pytest / PyInstaller），
+          # 不在这里另装，避免版本漂移导致「本地过、CI 挂」。
+          pip install -r requirements.txt
+
+      # ── 测试先行 ────────────────────────────────────────────────
+      # 曾经出现过「按钮重构把 btn_login 弄丢、整个认证链静默失效」
+      # 而 CI 只构建不运行，所以没被发现。这里跑单元测试 + GUI 冒测。
+      - name: 单元测试与 GUI 冒测
+        run: python -m pytest tests/ -v
+
+      # ── 构建 ────────────────────────────────────────────────────
+      # build_exe.py 内部已把「产物特征审计失败」变成构建失败，
+      # 所以这里不再传 --skip-audit：审计不过就发不出去。
+      - name: 打包免安装版（onedir，去 UPX，带版本资源）
+        run: python build_exe.py
+
+      # 单文件形态也走一次同样的审计门禁
+      - name: 打包单文件版（onefile）
+        run: python build_exe.py --onefile
+
+      # ⚠️ 必须在两种形态都构建完成之后才出包。
+      # 否则单文件包会打包到上一轮的旧 exe。
+      - name: 生成交付包（三种形态）
+        run: python make_release.py --all --out dist/packages
+
+      - name: 生成 SHA-256 校验文件
+        shell: pwsh
+        run: |
+          Remove-Item dist/packages/SHA256SUMS.txt -ErrorAction SilentlyContinue
+          Get-ChildItem dist/packages/*.zip | ForEach-Object {
+            $h = Get-FileHash $_.FullName -Algorithm SHA256
+            "$($h.Hash.ToLower())  $($_.Name)" |
+              Out-File -FilePath "dist/packages/SHA256SUMS.txt" -Append -Encoding utf8
+          }
+          Get-Content dist/packages/SHA256SUMS.txt
+
+      - name: 上传产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: GaoGaoNetAUTO-exe
+          path: |
+            dist/GaoGaoNetAUTO/**
+            dist/packages/*.zip
+            dist/packages/SHA256SUMS.txt
+          if-no-files-found: error
+
+      - name: 发布到 Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/packages/*.zip
+            dist/packages/SHA256SUMS.txt
