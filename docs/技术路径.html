@@ -523,7 +523,7 @@ logout?ip=&lt;手机IP&gt; → auth?ip=          自动顶替手机
 <ul><li><strong>「归还名额」按钮</strong> —— 一键 <code>logout?ip=&lt;PC_IP&gt;</code>，把位置让回手机</li><li><strong>只做 PC 独占</strong> —— 不实现热点/ICS/路由器共享</li></ul>
 <h3>5. MAC 随机化适配</h3>
 <p>单名额下 MAC 一变就被当成新设备，更容易撞限制。 本项目的做法是<strong>完全不去管它</strong>：</p>
-<ul><li>每次运行重新探测出口 IP 与 MAC（UDP connect 选路由 + 解析 ipconfig 按 IP 配对）</li><li>出口 IP 变化时（守护线程检测到）立即重新认证</li><li>文档中提示用户可自行关闭 Windows 的「随机硬件地址」，但不强制</li></ul>
+<ul><li>每次运行重新探测出口 IP 与 MAC（UDP connect 选路由 + <code>netprobe_win</code> 按 IP 精确配对物理地址）</li><li>出口 IP 变化时（守护线程检测到）立即重新认证</li><li>文档中提示用户可自行关闭 Windows 的「随机硬件地址」，但不强制</li></ul>
 <hr>
 <h2 id="自愈架构">自愈架构</h2>
 <p>这是本项目与原版最大的差异。<strong>光重放旧 Token 是不够的</strong>—— Token 一旦被服务端轮换，重放会永远失败。必须能<strong>自己换到新的</strong>。</p>

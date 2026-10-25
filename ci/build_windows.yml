@@ -21,18 +21,34 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt pyinstaller
 
-      - name: 打包
-        run: python build_exe.py
+      - name: 打包（onedir，去 UPX，带版本资源）
+        run: python build_exe.py --skip-audit
+
+      # 产物若命中高危特征（UPX / onefile 自解压 / 注册表自启动 /
+      # 注入类 API），CI 直接拒绝发布——避免误报版本流到用户手里。
+      - name: 产物特征审计（不通过则拒绝发布）
+        shell: pwsh
+        run: |
+          python tools/audit_features.py dist/GaoGaoNetAUTO
+          if ($LASTEXITCODE -ne 0) {
+            Write-Error "产物命中高危特征，拒绝发布"
+            exit 1
+          }
+
+      - name: 生成交付包
+        run: python make_release.py --all --out dist/packages
 
       - name: 上传产物
         uses: actions/upload-artifact@v4
         with:
           name: GaoGaoNetAUTO-exe
-          path: dist/GaoGaoNetAUTO.exe
+          path: |
+            dist/GaoGaoNetAUTO/**
+            dist/packages/*.zip
           if-no-files-found: error
 
       - name: 发布到 Release
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/GaoGaoNetAUTO.exe
+          files: dist/packages/*.zip

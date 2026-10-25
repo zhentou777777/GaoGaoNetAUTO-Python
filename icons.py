@@ -2,13 +2,19 @@
 """图标生成：用纯 Python 画一个 Wi-Fi 风格的 PNG / ICO。
 
 不依赖 Pillow —— PyInstaller 打包后体积更小，生成逻辑也完全可控。
+
+输出目录默认是数据目录 ``C:\\GaoGaoNetAUTO\\assets\\``（见 :func:`config.data_dir`），
+不再往 exe 旁边写文件：Program Files 下写入需要管理员权限，
+而打包成 onedir 后 exe 目录也不一定是可写位置。
+
+ICO 为多尺寸（16/24/32/48/64/128/256），避免资源管理器在缩放时糊掉。
 """
 from __future__ import annotations
 
 import struct
 import zlib
 from pathlib import Path
-from typing import List, Sequence, Tuple
+from typing import List, Optional, Sequence, Tuple
 
 RGBA = Tuple[int, int, int, int]
 
@@ -16,12 +22,40 @@ BG = (20, 20, 26, 255)
 ACCENT = (251, 114, 153, 255)
 WHITE = (255, 255, 255, 245)
 
-ASSETS = Path(__file__).resolve().parent / "assets"
-PNG_PATH = ASSETS / "icon.png"
-ICO_PATH = ASSETS / "icon.ico"
+# ICO 内嵌的尺寸列表（从小到大）
+ICO_SIZES = (16, 24, 32, 48, 64, 128, 256)
 
 _SIZE = 256
 _SS = 2  # 超采样倍数，用于抗锯齿
+
+
+def default_assets_dir() -> Path:
+    """默认图标输出目录：数据目录下的 assets/。
+
+    运行时用（托盘图标需要读 PNG）；打包时由 :mod:`build_exe` 显式指定
+    仓库内 ``assets/``，避免污染用户的 C 盘数据目录。
+    """
+    try:
+        from config import data_dir
+
+        return data_dir() / "assets"
+    except Exception:
+        return Path(__file__).resolve().parent / "assets"
+
+
+def bundled_assets_dir() -> Path:
+    """打包内置的 assets 目录。
+
+    PyInstaller onefile 解包到 ``sys._MEIPASS``；onedir 则在 exe 同级。
+    """
+    import sys
+
+    if getattr(sys, "frozen", False):
+        base = getattr(sys, "_MEIPASS", None)
+        if base:
+            return Path(base) / "assets"
+        return Path(sys.executable).resolve().parent / "assets"
+    return Path(__file__).resolve().parent / "assets"
 
 
 def _rounded_rect_alpha(x: float, y: float, size: int, radius: int) -> bool:
@@ -113,33 +147,59 @@ def _png_bytes(rows: Sequence[Sequence[RGBA]]) -> bytes:
     )
 
 
-def _ico_bytes(png: bytes, size: int) -> bytes:
-    header = struct.pack("<HHH", 0, 1, 1)
-    entry = struct.pack(
-        "<BBBBHHII",
-        0 if size >= 256 else size,
-        0 if size >= 256 else size,
-        0,
-        0,
-        1,
-        32,
-        len(png),
-        6 + 16,
-    )
-    return header + entry + png
+def _ico_bytes(entries: Sequence[Tuple[int, bytes]]) -> bytes:
+    """组装多尺寸 ICO（每个尺寸用 PNG 压缩存储，Vista+ 原生支持）。"""
+    count = len(entries)
+    header = struct.pack("<HHH", 0, 1, count)
+    offset = 6 + 16 * count
+    dir_entries = bytearray()
+    data = bytearray()
+    for size, png in entries:
+        dir_entries += struct.pack(
+            "<BBBBHHII",
+            0 if size >= 256 else size,
+            0 if size >= 256 else size,
+            0,
+            0,
+            1,
+            32,
+            len(png),
+            offset,
+        )
+        data += png
+        offset += len(png)
+    return bytes(header) + bytes(dir_entries) + bytes(data)
 
 
-def ensure_icons(force: bool = False) -> Tuple[Path, Path]:
-    """确保 assets/icon.png 与 assets/icon.ico 存在，返回它们的路径。"""
-    ASSETS.mkdir(parents=True, exist_ok=True)
-    if not force and PNG_PATH.exists() and ICO_PATH.exists():
-        return PNG_PATH, ICO_PATH
+def ensure_icons(force: bool = False,
+                 out_dir: Optional[Path] = None) -> Tuple[Path, Path]:
+    """确保 icon.png 与 icon.ico 存在，返回它们的路径。
 
-    rows = _render(_SIZE)
-    png = _png_bytes(rows)
-    PNG_PATH.write_bytes(png)
-    ICO_PATH.write_bytes(_ico_bytes(png, _SIZE))
-    return PNG_PATH, ICO_PATH
+    :param force:  已存在也强制重新生成。
+    :param out_dir: 输出目录，默认 :func:`default_assets_dir`。
+    """
+    # 打包后优先用内置资源（只读，避免往 C 盘反复写）
+    if out_dir is None:
+        bundled = bundled_assets_dir()
+        if not force and (bundled / "icon.png").exists() and \
+                (bundled / "icon.ico").exists():
+            return bundled / "icon.png", bundled / "icon.ico"
+
+    assets = Path(out_dir) if out_dir else default_assets_dir()
+    png_path = assets / "icon.png"
+    ico_path = assets / "icon.ico"
+    assets.mkdir(parents=True, exist_ok=True)
+    if not force and png_path.exists() and ico_path.exists():
+        return png_path, ico_path
+
+    # 主 PNG 固定 256（托盘用），ICO 内嵌多尺寸
+    png_path.write_bytes(_png_bytes(_render(_SIZE)))
+
+    entries: List[Tuple[int, bytes]] = []
+    for s in ICO_SIZES:
+        entries.append((s, _png_bytes(_render(s))))
+    ico_path.write_bytes(_ico_bytes(entries))
+    return png_path, ico_path
 
 
 if __name__ == "__main__":

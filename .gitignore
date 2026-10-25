@@ -19,3 +19,7 @@ apk_js/
 
 # 配置备份（自动生成）
 config_backup/
+
+# 签名私钥（绝不入库）
+*.pfx
+pfx-password.txt

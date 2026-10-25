@@ -177,7 +177,7 @@ tr:nth-child(even) td{background:rgba(255,255,255,.015)}
 <td><strong>R1</strong></td>
 <td>每次开机都能自动登录，不用手动点</td>
 <td>已实现</td>
-<td><code>main.py</code> <code>_startup_checks()</code> → <code>_delayed_login(8)</code>；自启由 <code>HKCU\...\CurrentVersion\Run</code> 写入（<code>main.py</code> <code>_apply_autostart</code>）</td>
+<td><code>main.py</code> <code>_startup_checks()</code> → <code>_delayed_login(8)</code>；自启由<strong>启动文件夹 <code>.cmd</code></strong> 实现（<code>main.py</code> <code>_apply_autostart</code>），已不再写注册表 Run 键</td>
 </tr>
 <tr>
 <td><strong>R2</strong></td>
@@ -224,20 +224,20 @@ tr:nth-child(even) td{background:rgba(255,255,255,.015)}
 <tr>
 <td><strong>R9</strong></td>
 <td>配置文件夹不要直接放桌面，放 C 盘同名文件夹</td>
-<td><strong>改造中</strong></td>
-<td>计划统一为 <code>C:\GaoGaoNetAUTO\</code>（<code>config.json</code> / <code>config.json.bak</code> / <code>assets/</code> / <code>qr_tmp.png</code> / <code>logs/</code>），与 exe 位置解耦，旧配置自动迁移一次</td>
+<td><strong>已实现</strong></td>
+<td><code>config.py</code> <code>data_dir()</code> → <code>C:\GaoGaoNetAUTO\</code>（<code>config.json</code> / <code>config.json.bak</code> / <code>assets/</code> / <code>qr_tmp.png</code> / <code>logs/</code>），与 exe 位置解耦；旧配置自动迁移一次（原文件保留）；<code>GAOGAO_DATA_DIR</code> 环境变量可覆盖</td>
 </tr>
 <tr>
 <td><strong>R10</strong></td>
 <td>第二台电脑不能被杀毒软件拦截（下载 + 运行双拦）</td>
-<td><strong>改造中</strong></td>
-<td>计划：onedir zip 为交付主形态、<code>--noupx</code> 去壳、<code>--version-file</code> 版本资源、自签名证书 + 目标机导入 <code>.cer</code>、<code>docs/Defender-误报排查.md</code></td>
+<td><strong>已实现</strong></td>
+<td><code>build_exe.py</code> 默认 <strong>onedir</strong>（不再自解压到 <code>%TEMP%</code>）、<code>--noupx</code> 去壳、<code>--version-file</code> 版本资源；<code>tools/sign_release.ps1</code> 自签名（带时间戳）并导出 <code>.cer</code>；<code>docs/Defender-误报排查.md</code> 处置手册；<code>tools/audit_features.py</code> 产物特征自检（CI 内置，不通过拒绝发布）</td>
 </tr>
 <tr>
 <td><strong>R11</strong></td>
 <td>开机自启实现方式不能被杀毒软件判为高危行为</td>
-<td><strong>改造中</strong></td>
-<td>计划：由写 <code>HKCU\...\CurrentVersion\Run</code> 改为写<strong>启动文件夹 <code>.cmd</code></strong>（纯文件操作，Defender 行为规则基本不覆盖），托盘菜单提供开关</td>
+<td><strong>已实现</strong></td>
+<td><code>main.py</code> <code>_apply_autostart()</code> 由写 <code>HKCU\...\CurrentVersion\Run</code> 改为写<strong>启动文件夹 <code>.cmd</code></strong>（纯文件操作）；<code>_migrate_autostart_legacy()</code> 自动清理旧注册表项；托盘菜单提供「开机自启」开关；<code>_sync_autostart()</code> 启动时对账配置与实际文件</td>
 </tr>
 </tbody></table>
 <h3>3.1 需求演进备注</h3>
@@ -264,21 +264,21 @@ tr:nth-child(even) td{background:rgba(255,255,255,.015)}
 <td>网关/默认路由探测</td>
 <td>系统信息</td>
 <td>默认网关</td>
-<td><code>ipconfig /all</code> 解析失败 → 返回空</td>
+<td><code>netprobe_win</code>（ctypes 调 <code>iphlpapi</code>）失败 → 返回空；优先取承载出口 IP 的那张网卡的网关</td>
 </tr>
 <tr>
 <td>F-3</td>
 <td>NAT 模式判定</td>
 <td>出口 IP</td>
 <td>是否处于 NAT 之后</td>
-<td>私有段兜底判定</td>
+<td><strong>主判据：出口 IP ≠ 本机 IP</strong>；外呼失败时兜底用私有网关 + 子网比对</td>
 </tr>
 <tr>
 <td>F-4</td>
 <td>MAC 地址获取</td>
 <td>系统信息</td>
 <td><code>xx:xx:xx:xx:xx:xx</code></td>
-<td><code>ipconfig</code> 解析失败 → <code>_mac_fallback()</code> 用 <code>uuid.getnode()</code></td>
+<td><code>netprobe_win.mac_for_ip()</code> 失败 → <code>_mac_fallback()</code> 取活动网卡物理地址，再退到 <code>uuid.getnode()</code></td>
 </tr>
 <tr>
 <td>F-5</td>

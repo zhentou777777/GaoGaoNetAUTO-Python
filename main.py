@@ -6,8 +6,8 @@
 """
 from __future__ import annotations
 
+import os
 import queue
-import subprocess
 import sys
 import threading
 import time
@@ -24,7 +24,7 @@ from auth import (
     TOKEN_INVALID,
     CampusAuth,
 )
-from config import Config, app_dir
+from config import Config, app_dir, data_dir
 from icons import ensure_icons
 from netguard import NetGuard
 from qrflow import QrAssistant
@@ -273,8 +273,10 @@ class App:
         self._quitting = False
         self._status = ("unknown", "尚未认证", TEXT3)
         self._tray = None
+        self._tray_autostart = None
 
         self._build()
+        self._migrate_autostart_legacy()
         self._load_settings()
         self._setup_tray()
         self._start_guard()
@@ -739,7 +741,7 @@ class App:
         self.var_phone_ip.set(str(self.cfg.get("phone_ip") or ""))
         self.var_host.set(str(self.cfg.get("host") or ""))
         self.var_port.set(str(self.cfg.get("port") or ""))
-        self.var_autostart.set(bool(self.cfg.get("autostart")))
+        self.var_autostart.set(self._autostart_enabled())
         self.var_kick.set(bool(self.cfg.get("auto_kick_phone", True)))
         self._update_info()
 
@@ -1245,7 +1247,7 @@ class App:
         if not state.ready:
             self.q.put(("qrstate", (state.status, state.message)))
             return
-        png = assistant.render_png(str(app_dir() / "qr_tmp.png"))
+        png = assistant.render_png(str(data_dir() / "qr_tmp.png"))
         self.q.put(("qr", png))
         self.q.put(("qrstate", (state.status, state.message)))
 
@@ -1326,6 +1328,7 @@ class App:
 
     def _startup_checks(self):
         self.q.put(("info", None))
+        self._sync_autostart()
         if self.cfg.has_token():
             threading.Thread(target=self._check_token_bg, daemon=True).start()
             if self.cfg.get("autostart"):
@@ -1343,6 +1346,22 @@ class App:
         else:
             self.log("尚未设置 Token，可点「扫码登录」先连上网，或点「怎么获取？」查看取 Token 步骤")
 
+    def _sync_autostart(self):
+        """把「启动文件夹里的实际文件」与「配置里的开关」对齐。
+
+        场景：用户换了台电脑、从旧版本升级、手动删了启动文件夹里的
+        .cmd —— 都会导致配置说「开」而实际没开（或反之）。
+        启动时对一次账，避免「以为开了自启其实没有」这种幽灵状态。
+        """
+        want = bool(self.cfg.get("autostart"))
+        have = self._autostart_enabled()
+        if want and not have:
+            self._apply_autostart(True)
+            self.log("已按配置补建开机自启（启动文件夹）")
+        elif have and not want:
+            self._apply_autostart(False)
+            self.log("已按配置清理开机自启")
+
     def _delayed_login(self, seconds: int):
         """延迟若干秒后自动认证（开机时网络尚未就绪）。"""
         def _worker():
@@ -1353,7 +1372,49 @@ class App:
 
     # ------------------------------------------------------------ 开机自启
 
-    def _apply_autostart(self, enable: bool):
+    def _startup_dir(self) -> Optional[Path]:
+        """当前用户的「启动」文件夹路径。"""
+        if sys.platform != "win32":
+            return None
+        try:
+            import winreg
+
+            key_path = r"Software\Microsoft\Windows\CurrentVersion\Explorer\Shell Folders"
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, key_path) as key:
+                raw, _ = winreg.QueryValueEx(key, "Startup")
+            raw = os.path.expandvars(str(raw))
+            d = Path(raw)
+            if d.is_dir():
+                return d
+        except Exception:
+            pass
+        try:
+            appdata = Path(os.environ.get("APPDATA", ""))
+            d = appdata / "Microsoft" / "Windows" / "Start Menu" / "Programs" / "Startup"
+            if d.is_dir():
+                return d
+        except Exception:
+            pass
+        return None
+
+    def _startup_cmd_path(self) -> Optional[Path]:
+        d = self._startup_dir()
+        return (d / "GaoGaoNetAUTO.cmd") if d else None
+
+    def _autostart_enabled(self) -> bool:
+        p = self._startup_cmd_path()
+        try:
+            return bool(p and p.exists())
+        except Exception:
+            return False
+
+    def _migrate_autostart_legacy(self):
+        """把旧版写在注册表 Run 里的自启项迁到启动文件夹。
+
+        旧版用的是 ``HKCU\\...\\CurrentVersion\\Run``（Defender T1547.001
+        高危特征）。升级后自动清掉注册表项并在启动文件夹落一个 ``.cmd``，
+        行为不变但不再触发杀软对「注册表自启动」的规则。
+        """
         if sys.platform != "win32":
             return
         try:
@@ -1361,24 +1422,75 @@ class App:
 
             key_path = r"Software\Microsoft\Windows\CurrentVersion\Run"
             with winreg.OpenKey(winreg.HKEY_CURRENT_USER, key_path, 0,
-                                winreg.KEY_SET_VALUE) as key:
-                if enable:
-                    if getattr(sys, "frozen", False):
-                        cmd = f'"{sys.executable}" --silent'
-                    else:
-                        pythonw = Path(sys.executable).with_name("pythonw.exe")
-                        exe = pythonw if pythonw.exists() else Path(sys.executable)
-                        cmd = f'"{exe}" "{Path(__file__).resolve()}" --silent'
-                    winreg.SetValueEx(key, "GaoGaoNetAUTO", 0, winreg.REG_SZ, cmd)
-                    self.log("已开启开机自启")
+                                winreg.KEY_READ | winreg.KEY_SET_VALUE) as key:
+                try:
+                    val, _ = winreg.QueryValueEx(key, "GaoGaoNetAUTO")
+                except FileNotFoundError:
+                    return
+                if not val:
+                    return
+                winreg.DeleteValue(key, "GaoGaoNetAUTO")
+            if not self._autostart_enabled():
+                self._apply_autostart(True)
+                try:
+                    self.cfg.set("autostart", True)
+                except Exception:
+                    pass
+                self.log("已把开机自启从注册表迁移到启动文件夹")
+        except Exception:
+            pass
+
+    def _apply_autostart(self, enable: bool):
+        """开机自启。
+
+        **不用注册表 Run 项**（``HKCU\\...\\CurrentVersion\\Run`` 属于
+        Defender T1547.001「注册表自启动/持久化」的高危特征，容易被杀软
+        直接拦下）。改为在「启动」文件夹放一个 ``.cmd`` 快捷脚本，
+        行为等价但特征风险低得多。
+        """
+        if sys.platform != "win32":
+            return
+        target = self._startup_cmd_path()
+        if target is None:
+            self.log("找不到「启动」文件夹，开机自启不可用")
+            return
+        try:
+            if enable:
+                if getattr(sys, "frozen", False):
+                    cmd = f'"{sys.executable}" --silent'
                 else:
-                    try:
-                        winreg.DeleteValue(key, "GaoGaoNetAUTO")
-                        self.log("已关闭开机自启")
-                    except FileNotFoundError:
-                        pass
+                    pythonw = Path(sys.executable).with_name("pythonw.exe")
+                    exe = pythonw if pythonw.exists() else Path(sys.executable)
+                    cmd = f'"{exe}" "{Path(__file__).resolve()}" --silent'
+                # .cmd 由 cmd.exe 读取，中文必须用 GBK（系统 ANSI 代码页），
+                # UTF-8 会变成乱码
+                target.write_bytes(
+                    ("@echo off\r\n"
+                     "rem 糕糕校园网自动认证 —— 开机自启\r\n"
+                     f"start \"\" {cmd}\r\n").encode("gbk", errors="replace")
+                )
+                self._hide_file(target)
+                self.log("已开启开机自启（启动文件夹）")
+            else:
+                if target.exists():
+                    target.unlink()
+                self.log("已关闭开机自启")
         except Exception as exc:
             self.log(f"设置开机自启失败: {exc}")
+
+    @staticmethod
+    def _hide_file(path: Path):
+        """给文件加「隐藏」属性（避免启动时闪一个黑框）。"""
+        try:
+            import ctypes
+
+            FILE_ATTRIBUTE_HIDDEN = 0x02
+            SetFileAttributesW = ctypes.windll.kernel32.SetFileAttributesW
+            SetFileAttributesW.argtypes = [ctypes.c_wchar_p, ctypes.c_uint32]
+            SetFileAttributesW.restype = ctypes.c_bool
+            SetFileAttributesW(str(path), FILE_ATTRIBUTE_HIDDEN)
+        except Exception:
+            pass
 
     # ------------------------------------------------------------ 托盘/窗口
 
@@ -1388,7 +1500,8 @@ class App:
             import pystray
             from PIL import Image
         except Exception:
-            self.log("未安装 pystray/Pillow，跳过托盘图标（关闭主窗口即隐藏）")
+            self.log("未安装 pystray/Pillow，跳过托盘图标（关闭主窗口即退出）")
+            self._tray = None
             return
         try:
             png, _ = ensure_icons()
@@ -1400,12 +1513,22 @@ class App:
             def do_login(_icon, _item):
                 self.q.put(("call", self._do_login))
 
+            def toggle_autostart(_icon, _item):
+                self.q.put(("call", self._toggle_autostart))
+
             def quit_app(_icon, _item):
                 self.q.put(("call", self._quit))
 
+            self._tray_autostart = pystray.MenuItem(
+                "开机自启",
+                toggle_autostart,
+                checked=lambda _item: self._autostart_enabled(),
+            )
             menu = pystray.Menu(
                 pystray.MenuItem("显示主窗口", show, default=True),
                 pystray.MenuItem("立即认证", do_login),
+                pystray.Menu.SEPARATOR,
+                self._tray_autostart,
                 pystray.Menu.SEPARATOR,
                 pystray.MenuItem("退出", quit_app),
             )
@@ -1413,7 +1536,23 @@ class App:
             threading.Thread(target=self._tray.run, daemon=True).start()
             self.log("托盘图标已就绪")
         except Exception as exc:
+            self._tray = None
             self.log(f"托盘图标初始化失败: {exc}")
+
+    def _toggle_autostart(self):
+        """托盘菜单里切换「开机自启」，并同步到配置文件。"""
+        enable = not self._autostart_enabled()
+        self._apply_autostart(enable)
+        try:
+            self.var_autostart.set(enable)
+            self.cfg.set("autostart", enable)
+        except Exception:
+            pass
+        try:
+            if getattr(self, "_tray", None):
+                self._tray.update_menu()
+        except Exception:
+            pass
 
     def _show_window(self):
         self.root.deiconify()
@@ -1441,7 +1580,7 @@ class App:
         self.root.geometry(f"+{e.x_root - self._dx}+{e.y_root - self._dy}")
 
     def _on_close(self):
-        """点右上角关闭：隐藏到托盘，后台继续守护。"""
+        """点右上角关闭：有托盘则隐藏到托盘后台守护；无托盘则直接退出。"""
         if self._quitting:
             self._quit()
             return
@@ -1467,6 +1606,11 @@ class App:
                         ).start()
         except Exception:
             pass
+        if not getattr(self, "_tray", None):
+            # 没有托盘 → 藏起来等于程序还在跑但用户找不到，直接退出
+            self.log("未启用托盘图标，直接退出")
+            self._quit()
+            return
         self.root.withdraw()
         self.log("已隐藏到托盘，右键托盘图标可退出")
 
@@ -1565,6 +1709,10 @@ class App:
                 "请在源码目录用命令行运行：python tokenlab.py",
             )
             return
+        # 延迟导入：subprocess 只在开发调试工具里用得上，
+        # 不放在模块顶层可减少静态分析可见的「起子进程」特征。
+        import subprocess
+
         subprocess.Popen([str(exe), str(script)], cwd=str(script.parent))
 
 

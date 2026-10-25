@@ -17,8 +17,8 @@ from __future__ import annotations
 import json
 import re
 import socket
-import subprocess
 import sys
+import time
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import quote
@@ -27,6 +27,11 @@ try:
     import requests
 except Exception:  # pragma: no cover - 打包环境异常兜底
     requests = None  # type: ignore
+
+try:
+    import netprobe_win
+except Exception:  # pragma: no cover - 打包环境异常兜底
+    netprobe_win = None  # type: ignore
 
 USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -156,80 +161,110 @@ class CampusAuth:
 
         用途：判断当前是「直连校园网」还是「经手机热点 NAT」——
         后者本机 IP 是 192.168.x.x，而云高只认出口 IP。
+
+        实现走 ``iphlpapi`` 的 ctypes 封装（:mod:`netprobe_win`），
+        **不创建任何子进程**（``ipconfig`` 会被 Defender 盯上）。
         """
+        if netprobe_win is None:
+            return ""
         try:
-            raw = subprocess.run(
-                ["ipconfig", "/all"], capture_output=True, timeout=8
-            ).stdout
+            # 优先取「承载本机出口 IP 的那张网卡」的网关，比全局默认网关准
+            ip = self.detect_local_ip()
+            if ip:
+                gw = netprobe_win.gateway_for_ip(ip)
+                if gw:
+                    return gw
+            return netprobe_win.default_gateway()
         except Exception:
             return ""
-        out = raw.decode("gbk", "ignore")
-        m = re.search(
-            r"Default Gateway[^0-9]*([0-9]{1,3}(?:\.[0-9]{1,3}){3})", out)
-        if m:
-            return m.group(1)
-        m = re.search(
-            r"默认网关[^0-9]*([0-9]{1,3}(?:\.[0-9]{1,3}){3})", out)
-        return m.group(1) if m else ""
+
+    def detect_exit_ip(self) -> str:
+        """探测「出口 IP」——即外网看到的本机地址。
+
+        与 :meth:`detect_local_ip` 的区别：后者是本机网卡地址（192.168.x.x），
+        前者是经过 NAT 之后的公网地址。手机热点场景下两者不同，
+        云高认证必须用出口 IP。
+
+        用轻量 HTTP 回显服务查询，失败返回空串（不阻塞主流程）。
+        结果缓存 60 秒，避免频繁外呼。
+        """
+        now = time.time()
+        cached = getattr(self, "_exit_ip_cache", None)
+        if isinstance(cached, tuple) and now - cached[0] < 60:
+            return cached[1]
+        ip = ""
+        if requests is not None:
+            for url in ("https://api.ipify.org",
+                        "https://ipinfo.io/ip",
+                        "https://myip.ipip.net"):
+                try:
+                    resp = requests.get(url, timeout=3)
+                    text = (resp.text or "").strip()
+                    m = re.search(r"\b(\d{1,3}(?:\.\d{1,3}){3})\b", text)
+                    if m:
+                        ip = m.group(1)
+                        break
+                except Exception:
+                    continue
+        self._exit_ip_cache = (now, ip)
+        return ip
 
     def is_nat_mode(self) -> bool:
         """判断本机是否处于 NAT 之后（典型场景：连手机热点）。
 
-        判据：默认网关是私有地址（192.168.x / 10.x / 172.16-31.x），
-        且网关与本机 IP 不在同一网段。
-        此时本机 IP 不是云高认的出口 IP，认证必须用出口 IP。
+        判据（按可靠度排序）：
+        1. **出口 IP ≠ 本机 IP** —— 最准。连手机热点时本机是
+           192.168.x.x，出口是手机的公网地址，两者必然不同。
+        2. 兜底：默认网关是私有地址，且与本机 IP **不在同一子网**。
+           （注意不能用「前两段相同」判断——手机热点网关
+           192.168.43.1 与本机 192.168.43.57 前两段相同，
+           但仍然是 NAT，必须按掩码算子网。）
         """
+        local_ip = self.detect_local_ip()
+        exit_ip = self.detect_exit_ip()
+        if local_ip and exit_ip and exit_ip != local_ip:
+            # 出口 IP 与本机不同 —— 一定经过了 NAT
+            return True
+        if not local_ip:
+            return False
         gw = self.detect_gateway()
-        ip = self.detect_local_ip()
-        if not gw or not ip:
+        if not gw:
             return False
-        # 网关是私有地址 → 典型的家用/热点路由器
-        if not (gw.startswith("192.168.") or gw.startswith("10.")
-                or (gw.startswith("172."))):
+        if not _is_private_ipv4(gw):
             return False
-        # 网关与本机不同段 → 经过了路由/NAT
-        try:
-            g = tuple(int(x) for x in gw.split("."))
-            i = tuple(int(x) for x in ip.split("."))
-            same = g[0] == i[0] and g[1] == i[1]
-            return not same
-        except Exception:
-            return False
+        # 网关与本机不在同一子网 → 经过了路由/NAT
+        return not _same_subnet(local_ip, gw)
 
     def detect_mac(self) -> str:
-        """取当前活动网卡的真实 MAC（Windows 下按 IP 精确匹配）。"""
+        """取当前活动网卡的真实 MAC（按出口 IP 精确匹配）。"""
         ip = self.detect_local_ip()
-        if ip:
-            mac = self._mac_by_ip(ip)
-            if mac:
-                return mac
+        if ip and netprobe_win is not None:
+            try:
+                mac = netprobe_win.mac_for_ip(ip)
+                if mac:
+                    return mac
+            except Exception:
+                pass
         return self._mac_fallback()
 
-    def _mac_by_ip(self, ip: str) -> str:
-        """解析 ipconfig 输出，把 IPv4 与其所属网卡的物理地址配对。"""
-        if sys.platform != "win32":
-            return ""
-        try:
-            out = subprocess.run(
-                ["ipconfig", "/all"],
-                capture_output=True,
-                text=True,
-                timeout=8,
-                errors="ignore",
-            ).stdout
-        except Exception:
-            return ""
-        mac_re = re.compile(r"(?<![\w-])([0-9A-Fa-f]{2}([:-][0-9A-Fa-f]{2}){5})(?![\w-])")
-        ip_re = re.compile(r"\b(\d{1,3}(?:\.\d{1,3}){3})\b")
-        for block in re.split(r"\r?\n\s*\r?\n", out):
-            if ip not in ip_re.findall(block):
-                continue
-            macs = mac_re.findall(block)
-            if macs:
-                return macs[0][0].replace("-", ":").upper()
-        return ""
-
     def _mac_fallback(self) -> str:
+        """兜底取 MAC：优先取活动网卡的物理地址，其次用 uuid.getnode()。"""
+        if netprobe_win is not None:
+            try:
+                ip = self.detect_local_ip()
+                adapters = netprobe_win.adapters()
+                # 优先选「有 IP 且带 MAC」的网卡里索引最小的那张
+                cands = [a for a in adapters
+                         if a.get("mac") and (a.get("ip") or a.get("extra_ips"))]
+                if cands:
+                    if ip:
+                        for a in cands:
+                            if a.get("ip") == ip or ip in (a.get("extra_ips") or []):
+                                return str(a["mac"])
+                    cands.sort(key=lambda a: int(a.get("index") or 0))
+                    return str(cands[0]["mac"])
+            except Exception:
+                pass
         try:
             node = uuid_getnode()
             raw = f"{node:012X}"
@@ -700,3 +735,40 @@ def uuid_getnode() -> int:
     import uuid
 
     return uuid.getnode()
+
+
+def _ip_to_int(ip: str) -> int:
+    try:
+        parts = [int(x) for x in str(ip).split(".")]
+        if len(parts) != 4:
+            return -1
+        if any(p < 0 or p > 255 for p in parts):
+            return -1
+        return (parts[0] << 24) | (parts[1] << 16) | (parts[2] << 8) | parts[3]
+    except Exception:
+        return -1
+
+
+def _is_private_ipv4(ip: str) -> bool:
+    """判断是否为 RFC1918 私有地址。"""
+    n = _ip_to_int(ip)
+    if n < 0:
+        return False
+    if (n >> 24) == 10:
+        return True
+    second = (n >> 16) & 0xFF
+    if (n >> 24) == 172 and 16 <= second <= 31:
+        return True
+    if (n >> 24) == 192 and second == 168:
+        return True
+    return False
+
+
+def _same_subnet(ip_a: str, ip_b: str, mask: str = "255.255.255.0") -> bool:
+    """判断两个 IPv4 是否在同一子网（按给定掩码）。"""
+    a = _ip_to_int(ip_a)
+    b = _ip_to_int(ip_b)
+    m = _ip_to_int(mask)
+    if a < 0 or b < 0 or m < 0:
+        return False
+    return (a & m) == (b & m)
