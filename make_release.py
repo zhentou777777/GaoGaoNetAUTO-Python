@@ -43,49 +43,6 @@ SOURCE_FILES = [
 SOURCE_DIRS = ["assets", "docs", "tools"]
 
 
-def desktop_dir() -> Path:
-    """定位真实桌面（本机桌面被重定向到 D:\\zhuomian）。"""
-    import ctypes
-    from ctypes import wintypes
-
-    class GUID(ctypes.Structure):
-        _fields_ = [
-            ("Data1", wintypes.DWORD),
-            ("Data2", wintypes.WORD),
-            ("Data3", wintypes.WORD),
-            ("Data4", ctypes.c_byte * 8),
-        ]
-
-    buf = ctypes.create_unicode_buffer(260)
-    try:
-        ctypes.windll.shell32.SHGetFolderPathW(
-            None, 0x0010, None, 0, buf)
-        p = Path(buf.value)
-        if p.is_dir():
-            return p
-    except Exception:
-        pass
-    try:
-        import winreg
-
-        key_path = (r"Software\Microsoft\Windows\CurrentVersion"
-                    r"\Explorer\User Shell Folders")
-        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, key_path) as key:
-            raw, _ = winreg.QueryValueEx(key, "Desktop")
-        import os
-
-        p = Path(os.path.expandvars(str(raw)))
-        if p.is_dir():
-            return p
-    except Exception:
-        pass
-    for cand in (Path.home() / "Desktop", Path("D:/zhuomian"),
-                 Path("C:/Users") / __import__("getpass").getuser() / "Desktop"):
-        if cand.is_dir():
-            return cand
-    return Path.home()
-
-
 def md5(path: Path) -> str:
     h = hashlib.md5()
     with path.open("rb") as f:
@@ -183,15 +140,27 @@ def build_source_zip(out_dir: Path) -> Path | None:
     return dst
 
 
+def release_dir() -> Path:
+    """交付包输出目录 —— 固定在项目内的 ``release/``。
+
+    **不写到桌面**：桌面是用户的私人空间，往里扔构建产物会污染它。
+    需要成品时自己从这里取，或用 ``--out`` 指定别的目录。
+    """
+    d = HERE / "release"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="生成交付包")
     ap.add_argument("--onefile", action="store_true", help="追加单文件包")
     ap.add_argument("--source", action="store_true", help="追加源码绿色包")
     ap.add_argument("--all", action="store_true", help="全部形态")
-    ap.add_argument("--out", default="", help="输出目录，默认桌面")
+    ap.add_argument("--out", default="",
+                    help="输出目录（默认项目内的 release/，不会写桌面）")
     args = ap.parse_args()
 
-    out_dir = Path(args.out) if args.out else desktop_dir()
+    out_dir = Path(args.out) if args.out else release_dir()
     out_dir.mkdir(parents=True, exist_ok=True)
     print(f"输出目录：{out_dir}")
 

@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""打包全部文档成 zip，交付到桌面。
+"""打包全部文档成 zip。
 
 只依赖标准库。
 
@@ -8,12 +8,13 @@
 
 产物：
     dist/文档包/GaoGaoNetAUTO-文档包-v1.0.0/     （中间目录）
-    <桌面>/GaoGaoNetAUTO-文档包-v1.0.0.zip        （最终交付）
+    release/GaoGaoNetAUTO-文档包-v1.0.0.zip      （最终交付）
+
+**不写桌面** —— 桌面是用户的私人空间，构建产物一律留在项目内。
 """
 from __future__ import annotations
 
 import hashlib
-import os
 import shutil
 import sys
 import zipfile
@@ -173,7 +174,7 @@ Pillow>=10.0.0        # 托盘图标（可选，缺失时程序降级）
 # Markdown → 单文件 HTML（纯标准库，不装第三方 markdown）
 python docs/build_html.py
 
-# 打包全部文档到桌面 zip
+# 打包全部文档到项目内 release/ 目录
 python make_docs_package.py
 ```
 
@@ -306,42 +307,6 @@ def md5(path: Path) -> str:
     return h.hexdigest()
 
 
-def desktop() -> Path:
-    """定位真实的桌面目录（桌面可能被重定向到非 C 盘）。"""
-    # 1) Windows 正式 API
-    try:
-        import ctypes
-        buf = ctypes.create_unicode_buffer(1024)
-        ctypes.windll.shell32.SHGetFolderPathW(None, 0x0010, None, 0, buf)
-        cand = Path(buf.value)
-        if cand.is_dir():
-            return cand
-    except Exception:
-        pass
-
-    # 2) 注册表 Shell Folders（桌面重定向的真实位置）
-    try:
-        import winreg
-        with winreg.OpenKey(
-            winreg.HKEY_CURRENT_USER,
-            r"Software\Microsoft\Windows\CurrentVersion\Explorer\User Shell Folders",
-        ) as key:
-            raw = str(winreg.QueryValueEx(key, "Desktop")[0])
-        cand = Path(os.path.expandvars(raw))
-        if cand.is_dir():
-            return cand
-    except Exception:
-        pass
-
-    # 3) 常见位置兜底
-    home = Path.home()
-    for cand in (home / "Desktop", home / "OneDrive" / "Desktop",
-                 Path("D:/zhuomian")):
-        if cand.is_dir():
-            return cand
-    return home
-
-
 def main() -> int:
     if OUT_DIR.exists():
         shutil.rmtree(OUT_DIR)
@@ -385,8 +350,10 @@ def main() -> int:
     lines.append(f"{'合计（不含 MANIFEST）':<32}{total:>10}")
     (OUT_DIR / "MANIFEST.txt").write_text("\n".join(lines) + "\n", encoding="utf-8")
 
-    # zip → 桌面
-    out_zip = desktop() / f"{PKG_NAME}.zip"
+    # zip → 项目内 release/（**不写桌面**，桌面是用户的私人空间）
+    release_dir = HERE / "release"
+    release_dir.mkdir(parents=True, exist_ok=True)
+    out_zip = release_dir / f"{PKG_NAME}.zip"
     if out_zip.exists():
         out_zip.unlink()
     with zipfile.ZipFile(out_zip, "w", zipfile.ZIP_DEFLATED) as z:

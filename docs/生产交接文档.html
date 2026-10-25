@@ -198,7 +198,7 @@ tr:nth-child(even) td{background:rgba(255,255,255,.015)}
 <blockquote><p>三个 zip 的 MD5 会随每次改动变化，<strong>以实际交付的包为准</strong>。</p><p>校验：&lt;br&gt;<code>md5sum *.zip</code>（Git Bash）或 <code>Get-FileHash .\*.zip -Algorithm MD5</code>（PowerShell）。&lt;br&gt;</p><p>文档包内含 <code>MANIFEST.txt</code>（每个文件的路径、字节数、MD5），可逐文件核对。</p></blockquote>
 <blockquote><p><strong>三种形态怎么选</strong></p><p>| 场景 | 选哪个 | 原因 |</p><p>|---|---|---|</p><p>| 给终端用户 / 第二台电脑 | <strong>免安装包（onedir）</strong> | 不往 <code>%TEMP%</code> 自解压，Defender 行为特征最干净 |</p><p>| 需要单文件、拷贝方便 | 单文件包 | 启动时会解包到 <code>%TEMP%</code>，误报率略高 |</p><p>| 要改代码 / 目标机没有 Python | 源码绿色包 | 含 <code>setup.bat</code> 一键装依赖 |</p><p><strong>签名状态</strong>：两个 exe 形态均已自签名（<code>CN=Gaogao Campus Auth</code>，SHA256 + 可信时间戳，有效期至 2029-10-25），</p><p>实测 <code>Get-AuthenticodeSignature</code> 返回 <code>Status: Valid</code>。</p><p>⚠️ <strong>默认无需导入证书</strong> —— 被拦时点「更多信息」→「仍要运行」即可；</p><p>导入 <code>.cer</code> 到 <code>TrustedPublisher</code> 只是让「发布者」不显示「未知」，<strong>不要导入根证书库</strong>。</p><p><strong><code>.pfx</code> 私钥与密码文件不随包分发</strong>（已在校验中排除）。</p></blockquote>
 <blockquote><p><strong>校验方法</strong>（PowerShell）：</p><p>```powershell</p><p>Get-FileHash .\GaoGaoNetAUTO-v1.0.0-免安装.zip -Algorithm MD5</p><p>```</p><p>或 Git Bash：<code>md5sum GaoGaoNetAUTO-v1.0.0-免安装.zip</code></p></blockquote>
-<blockquote><p>当前仓库内 <code>release/</code> 存有旧版单文件 exe（onefile，18.5 MB）作历史对照；</p><p>新版以 <code>dist/</code> 与桌面上的 zip 为准。</p></blockquote>
+<blockquote><p><strong>交付包位置</strong>：项目内 <code>release/</code> 目录（<code>make_release.py</code> / <code>make_docs_package.py</code> 的默认输出）。</p><p>构建产物<strong>不写桌面</strong> —— 桌面是使用者的私人空间，需要成品时自己从这里取。</p></blockquote>
 <h3>0.3 交接确认表</h3>
 <table><thead><tr>
 <th>#</th>
@@ -845,7 +845,7 @@ py -3 -m venv .venv
 .\.venv\Scripts\python.exe build_exe.py --onefile  # 单文件
 .\.venv\Scripts\python.exe build_exe.py --sign     # 打包 + 自签名
 
-# 4) 生成交付包（三种形态，默认输出到桌面）
+# 4) 生成交付包（三种形态，默认输出到项目内 release/）
 .\.venv\Scripts\python.exe make_release.py --all</code></pre>
 <p>产物：<code>dist/GaoGaoNetAUTO/</code>（onedir 目录）或 <code>dist/GaoGaoNetAUTO.exe</code>（onefile）。</p>
 <blockquote><p>⚠️ <strong>tkinter 是硬依赖</strong>。精简版 Python、conda base、多数 CI 容器镜像都不带 tkinter，</p><p>而 PyInstaller <strong>不会报错</strong>——能打出 exe，一运行就 <code>ModuleNotFoundError</code>。</p><p><code>build_exe.py</code> 已内置环境自检，打包前就会拦下并提示换 Python。</p><p>本机使用的构建环境：<code>D:\py\python.exe</code>（Python 3.11.0rc2 + tkinter 8.6）。</p></blockquote>
@@ -1926,7 +1926,7 @@ python build_exe.py --onefile      # 单文件
 # 生成 HTML 文档
 python docs/build_html.py
 
-# 打包文档（桌面）
+# 打包文档（输出到项目内 release/）
 python make_docs_package.py
 
 # 账号密码链路自检（不保存凭据）

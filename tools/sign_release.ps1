@@ -11,8 +11,10 @@
       少了这个 Windows 不认，签名等于没签。
     * 必须挂**可信时间戳**，否则证书到期后签名失效，
       装到别人机器上也照样报「签名无效」。
-    * 导出 .cer 供目标机导入：LocalMachine\Root（信任根）
-      + LocalMachine\TrustedPublisher（信任发布者）。
+    * 导出 .cer 供目标机导入：只导入 LocalMachine\TrustedPublisher（信任发布者）。
+      **不要**导入 LocalMachine\Root（受信任的根）—— 自签名证书进根库
+      等于给目标机装一个可签任意代码的根，风险远大于收益。
+    * 目标机被拦时的首选做法是「更多信息 → 仍要运行」，默认无需导入证书。
 
     优先用 Windows SDK 的 signtool.exe（支持 RFC3161 时间戳）；
     找不到时回退到 PowerShell 的 Set-AuthenticodeSignature。
@@ -84,18 +86,15 @@ if (-not $cert) {
 }
 
 # 本机信任自己的证书，方便校验时显示 Valid
-# （用 Export/Import 而不是 New-Object X509Certificate2，
-#   后者在部分 .NET 版本上对 PrivateKey 的处理会抛异常）
+# 只装 TrustedPublisher —— 不装根证书库（避免给本机加一个可签任意代码的根）
 try {
     $tmpCer = Join-Path $env:TEMP "gaogao-trust.cer"
     Export-Certificate -Cert $cert -FilePath $tmpCer | Out-Null
-    foreach ($store in @("Root", "TrustedPublisher")) {
-        $dst = "Cert:\CurrentUser\$store"
-        if (-not (Get-ChildItem $dst -ErrorAction SilentlyContinue |
-                  Where-Object { $_.Thumbprint -eq $cert.Thumbprint })) {
-            Import-Certificate -FilePath $tmpCer -CertStoreLocation $dst | Out-Null
-            Write-Host "  已加入本机信任：$dst"
-        }
+    $dst = "Cert:\CurrentUser\TrustedPublisher"
+    if (-not (Get-ChildItem $dst -ErrorAction SilentlyContinue |
+              Where-Object { $_.Thumbprint -eq $cert.Thumbprint })) {
+        Import-Certificate -FilePath $tmpCer -CertStoreLocation $dst | Out-Null
+        Write-Host "  已加入本机信任：$dst"
     }
     Remove-Item $tmpCer -Force -ErrorAction SilentlyContinue
 } catch {
@@ -173,10 +172,13 @@ if ($final.Status -eq "Valid") {
 }
 
 Write-Host ""
-Write-Host "目标机还需要导入 $cerPath 才能显示为「已信任」：" -ForegroundColor Yellow
-Write-Host "  1) 双击 .cer → 安装到「本地计算机」→ 受信任的根证书颁发机构"
-Write-Host "  2) 再导入一次到「受信任的发布者」"
-Write-Host "  管理员 PowerShell 一键导入："
-Write-Host "  Import-Certificate -FilePath '$cerPath' -CertStoreLocation Cert:\LocalMachine\Root"
+Write-Host "目标机被拦时的首选做法：**不需要导入任何证书**" -ForegroundColor Yellow
+Write-Host "  双击 exe → 点「更多信息」→「仍要运行」即可。"
+Write-Host ""
+Write-Host "如需消除「未知发布者」外观，只导入 TrustedPublisher（不要导入根证书库）：" -ForegroundColor Yellow
+Write-Host "  管理员 PowerShell："
 Write-Host "  Import-Certificate -FilePath '$cerPath' -CertStoreLocation Cert:\LocalMachine\TrustedPublisher"
+Write-Host ""
+Write-Host "  ⚠️ 不建议导入 Cert:\LocalMachine\Root（受信任的根）——自签名证书进根库"
+Write-Host "     等于给目标机装一个可签任意代码的根，风险远大于收益。"
 exit 0
