@@ -59,7 +59,7 @@ SmartScreen/Defender 记住这个哈希后，同一个文件再运行就不会�
 
 ```powershell
 # 管理员 PowerShell —— 只排除这一个 zip / exe，不要排除整个下载目录
-Add-MpPreference -ExclusionPath "D:\Downloads\GaoGaoNetAUTO-v1.0.0-免安装.zip"
+Add-MpPreference -ExclusionPath "D:\Downloads\GaoGaoNetAUTO-v1.0.2-portable.zip"
 
 # 确认已生效
 Get-MpPreference | Select-Object -ExpandProperty ExclusionPath
@@ -70,7 +70,7 @@ Get-MpPreference | Select-Object -ExpandProperty ExclusionPath
 > 理想情况是排除这一个具体文件。
 >
 > ❌ `Add-MpPreference -ExclusionPath "D:\Downloads"`   ← 范围过大，不推荐
-> ✅ `Add-MpPreference -ExclusionPath "D:\Downloads\GaoGaoNetAUTO-v1.0.0-免安装.zip"`  ← 精确到文件
+> ✅ `Add-MpPreference -ExclusionPath "D:\Downloads\GaoGaoNetAUTO-v1.0.2-portable.zip"`  ← 精确到文件
 
 **方案 3：临时关闭实时保护（仅限你完全确认来源时）**
 
@@ -90,8 +90,8 @@ Set-MpPreference -DisableRealtimeMonitoring $false
 从浏览器/微信下载的文件带 `Zone.Identifier` 标记，Windows 会额外弹「安全警告」。解除：
 
 ```powershell
-Unblock-File -Path "D:\Downloads\GaoGaoNetAUTO-文档包-v1.0.0.zip"
-Get-Item "D:\Downloads\GaoGaoNetAUTO-文档包-v1.0.0.zip" -Stream *   # 确认已无 Zone.Identifier
+Unblock-File -Path "D:\Downloads\GaoGaoNetAUTO-v1.0.2-docs.zip"
+Get-Item "D:\Downloads\GaoGaoNetAUTO-v1.0.2-docs.zip" -Stream *   # 确认已无 Zone.Identifier
 ```
 
 ---

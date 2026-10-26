@@ -75,6 +75,16 @@ _STATUS_VALUE_MAP = {
 # 二维码会话有效期（分钟）——与服务端 str cookie 的 10 分钟一致
 SESSION_TTL_MINUTES = 10
 
+# 轮询节流（秒）
+#
+# 轮询本身每 2 秒一次，但**不能每 2 秒都去打网关**：
+#   * ``auth?str=`` 是一次真实的认证请求，10 分钟能发出 300 次；
+#   * ``probe_online()`` 每次要连 3 个探测地址，同样不能每 2 秒发一轮。
+# 下面两个间隔把「确认」类请求都降到可接受频率，检测延迟仍然只有几秒。
+PROBE_INTERVAL = 4.0          # 连通性探测最短间隔
+AUTH_CONFIRM_INTERVAL = 15.0  # auth?str= 确认的最短间隔
+AUTH_CONFIRM_GRACE = 5.0      # 生成二维码后先留几秒给用户扫
+
 
 @dataclass
 class QrState:
@@ -226,6 +236,9 @@ class QrAssistant:
         self._session_uuid = ""
         # 二维码生成时刻——用于判断是否超过服务端有效期（10 分钟）
         self._created_at = 0.0
+        # 上一次「打网关」的时刻，用于轮询节流
+        self._last_probe_at = 0.0
+        self._last_auth_at = 0.0
         # 轮询期间服务端会因重新拉页面而不断下发新的 str cookie，
         # 这里把原始的会话 UUID 固定下来，避免被覆盖。
         self._session_cookie = ""
@@ -276,6 +289,8 @@ class QrAssistant:
 
         self._online_before = probe_online()
         self._created_at = time.time()
+        self._last_probe_at = self._created_at
+        self._last_auth_at = 0.0
         self.state.status = "waiting"
         self.state.message = "请用糕糕 APP 扫描二维码"
         return self.state
@@ -336,35 +351,54 @@ class QrAssistant:
 
         * **联网成功**：本机由「离线」变为「能连通外网」→ 服务端已放行本 session；
         * **会话过期**：重新拉页面时服务端换了新的 ``str`` UUID → 旧二维码作废。
+
+        两个「确认」信号都会打网关，所以按 :data:`PROBE_INTERVAL` /
+        :data:`AUTH_CONFIRM_INTERVAL` 节流；本函数被调得再密也不会变成
+        对网关的压测。
         """
         if self.state.status in ("authorized", "expired", "failed"):
             return self.state
+
+        now = time.time()
 
         from netguard import probe_online
 
         # --- 信号 1（最强）：带 Token 调 auth?str=<会话ID> ---
         # 这正是网页扫码流程的最后一跳：APP 授权后，PC 用同一个 str 确认上线。
         # 服务端认的 str 就是 cookie/XOR 载荷里的那个 UUID。
-        token = ""
-        try:
-            token = self.auth.cfg.get_token() or ""
-        except Exception:
+        #
+        # ⚠️ 这是一次**真实认证请求**，不能跟着 2 秒轮询一起发 ——
+        # 10 分钟会打出 300 次。这里限制成最多每 AUTH_CONFIRM_INTERVAL 一次，
+        # 并且生成二维码后先留 AUTH_CONFIRM_GRACE 秒给用户扫。
+        if (self._session_uuid
+                and now - self._created_at >= AUTH_CONFIRM_GRACE
+                and now - self._last_auth_at >= AUTH_CONFIRM_INTERVAL):
             token = ""
-        if token and self._session_uuid:
             try:
-                res = self.auth.auth_by_code(self._session_uuid, token)
-                if res.ok:
-                    self.state.status = "authorized"
-                    self.state.message = "已授权，设备已上线"
-                    return self.state
+                token = self.auth.cfg.get_token() or ""
             except Exception:
-                pass
+                token = ""
+            if token:
+                self._last_auth_at = now
+                try:
+                    res = self.auth.auth_by_code(self._session_uuid, token)
+                    if res.ok:
+                        self.state.status = "authorized"
+                        self.state.message = "已授权，设备已上线"
+                        return self.state
+                except Exception:
+                    pass
 
         # --- 信号 2：本机是否已联网（零 Token 场景下的完成信号）---
-        if not self._online_before and probe_online():
-            self.state.status = "authorized"
-            self.state.message = "已授权，设备已上线"
-            return self.state
+        # 探测要连 3 个目标地址，同样限流；已经在线（_online_before）时这个
+        # 信号本来就是无效的，直接跳过。
+        if (not self._online_before
+                and now - self._last_probe_at >= PROBE_INTERVAL):
+            self._last_probe_at = now
+            if probe_online():
+                self.state.status = "authorized"
+                self.state.message = "已授权，设备已上线"
+                return self.state
 
         # --- 信号 3：会话是否被服务端作废（超时）---
         # 注意：每次请求 /web/network/code 服务端都会下发**新的** str，

@@ -8,7 +8,7 @@
 
 产物：
     dist/文档包/GaoGaoNetAUTO-文档包-v<VERSION>/     （中间目录）
-    release/GaoGaoNetAUTO-文档包-v<VERSION>.zip      （最终交付）
+    release/GaoGaoNetAUTO-v<VERSION>-docs.zip         （最终交付）
 
 **不写桌面** —— 桌面是用户的私人空间，构建产物一律留在项目内。
 """
@@ -20,9 +20,22 @@ import sys
 import zipfile
 from pathlib import Path
 
+# ---------------------------------------------------------------- 控制台编码
+# Windows 控制台 / CI runner 的默认编码可能是 cp1252（GitHub Actions 就是），
+# 直接 print 中文会抛 UnicodeEncodeError 让构建在第一步就崩掉。
+# 统一把 stdout/stderr 切到 UTF-8，替换不出来的字符而不是炸掉。
+try:
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+except Exception:
+    pass
+
 HERE = Path(__file__).resolve().parent
-VERSION = "1.0.1"
+VERSION = "1.0.2"
 PKG_NAME = f"GaoGaoNetAUTO-文档包-v{VERSION}"
+# 落盘的文件名用英文（中文名上传 GitHub Release 会 404）；
+# zip 内的目录名保留中文，解压后好认。
+PKG_ZIP = f"GaoGaoNetAUTO-v{VERSION}-docs.zip"
 OUT_DIR = HERE / "dist" / "文档包" / PKG_NAME
 
 DOCS = HERE / "docs"
@@ -270,14 +283,18 @@ Import-Certificate -FilePath .\\GaoGaoNetAUTO.cer -CertStoreLocation Cert:\\Loca
 
 ### Release 附件
 
-| 附件 | 必给 |
-|---|---|
-| `GaoGaoNetAUTO.exe` | ✅ |
-| `GaoGaoNetAUTO-ondir.zip` | ✅ |
-| `GaoGaoNetAUTO-portable.zip` | ✅ |
-| `GaoGaoNetAUTO.cer` | ✅ |
-| `需求说明书.html` / `生产交接文档.html` / `使用教程.html` / `技术路径.html` | ✅ |
-| `文档包.zip` | 可选 |
+附件名**一律英文**（中文名上传会 404），中文说明写在 Release 正文里。
+
+| 附件 | 必给 | 说明 |
+|---|---|---|
+| `GaoGaoNetAUTO.exe` | ✅ | 单文件版，双击即用 |
+| `GaoGaoNetAUTO-vX.Y.Z-portable.zip` | ✅ | 目录版（**推荐**，误报最低） |
+| `GaoGaoNetAUTO-vX.Y.Z-source.zip` | ✅ | 源码绿色包（需自装 Python） |
+| `GaoGaoNetAUTO-vX.Y.Z-docs.zip` | ✅ | 文档包（HTML + Markdown） |
+| `GaoGaoNetAUTO-sign.cer` | ✅ | 自签名公钥证书（可选导入） |
+
+> 目录版 zip 里已经含 `GaoGaoNetAUTO.exe`，所以**不再单独发** `singlefile.zip`
+> —— 单文件版直接用上面那个裸 exe 就是。
 
 ---
 
@@ -350,7 +367,7 @@ def main() -> int:
     # zip → 项目内 release/（**不写桌面**，桌面是用户的私人空间）
     release_dir = HERE / "release"
     release_dir.mkdir(parents=True, exist_ok=True)
-    out_zip = release_dir / f"{PKG_NAME}.zip"
+    out_zip = release_dir / PKG_ZIP
     if out_zip.exists():
         out_zip.unlink()
     with zipfile.ZipFile(out_zip, "w", zipfile.ZIP_DEFLATED) as z:

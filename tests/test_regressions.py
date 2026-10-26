@@ -106,3 +106,82 @@ class TestAccountLoginClassify:
         assert _classify({"msg": "手机号不合法"}) == ERR_BAD_MOBILE
         assert _classify({"msg": "参数不能为空"}) == ERR_BAD_PARAMS
         assert _classify({"msg": "密码错误"}) == ERR_BAD_PASSWORD
+
+
+class TestQrPollThrottle:
+    """扫码轮询不能变成对网关的压测。
+
+    曾经的实现每 2 秒发一次 ``auth?str=``（真实认证请求）+ 一轮
+    ``probe_online()``（3 个探测地址），10 分钟能发出几百次请求。
+    """
+
+    def _assistant(self, monkeypatch):
+        import netguard
+        import qrflow
+
+        monkeypatch.setattr(netguard, "probe_online", lambda *a, **k: False)
+        calls = []
+
+        class FakeCfg:
+            @staticmethod
+            def get_token():
+                return "token-value-1234567890"
+
+        class FakeAuth:
+            cfg = FakeCfg()
+
+            def fetch_code_page(self, ip, mac):
+                return "uuid-1", '<html>var code="uuid-1"</html>'
+
+            def auth_by_code(self, session, token):
+                calls.append(session)
+                return type("R", (), {"ok": False})()
+
+        a = qrflow.QrAssistant(FakeAuth())
+        a.load("1.2.3.4", "aa:bb")
+        return a, calls
+
+    def test_poll_does_not_hit_gateway_every_tick(self, monkeypatch):
+        a, calls = self._assistant(monkeypatch)
+        for _ in range(10):
+            a.poll("1.2.3.4", "aa:bb")
+        assert calls == [], "二维码刚生成就开始打 auth?str= 了"
+
+    def test_poll_confirms_after_grace_and_then_respects_interval(self, monkeypatch):
+        import qrflow
+
+        a, calls = self._assistant(monkeypatch)
+        a._created_at -= qrflow.AUTH_CONFIRM_GRACE + 1
+        a.poll("1.2.3.4", "aa:bb")
+        assert len(calls) == 1
+
+        for _ in range(5):          # 间隔没到，不该再发
+            a.poll("1.2.3.4", "aa:bb")
+        assert len(calls) == 1
+
+        a._last_auth_at -= qrflow.AUTH_CONFIRM_INTERVAL + 1
+        a.poll("1.2.3.4", "aa:bb")
+        assert len(calls) == 2
+
+
+class TestBuildTooling:
+    """构建脚本的两条硬约束。"""
+
+    def test_release_zip_names_are_ascii(self):
+        """交付包文件名必须是纯 ASCII —— 中文名上传 GitHub Release 会 404。"""
+        text = (ROOT / "make_release.py").read_text(encoding="utf-8")
+        for suffix in ("portable.zip", "singlefile.zip", "source.zip"):
+            assert suffix in text, suffix
+        for legacy in ("免安装.zip", "单文件.zip", "源码绿色包.zip"):
+            assert legacy not in text, f"仍有中文包名：{legacy}"
+
+    def test_build_scripts_force_utf8_stdout(self):
+        """Windows runner 的控制台是 cp1252 —— 不切 UTF-8，print 中文就崩。
+
+        v1.0.0 / v1.0.1 的两次 CI 都是挂在
+        ``UnicodeEncodeError: 'charmap' codec can't encode`` 上。
+        """
+        for name in ("build_exe.py", "make_release.py",
+                     "make_docs_package.py", "tools/audit_features.py"):
+            text = (ROOT / name).read_text(encoding="utf-8")
+            assert 'reconfigure(encoding="utf-8"' in text, name

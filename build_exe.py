@@ -34,6 +34,16 @@ import subprocess
 import sys
 from pathlib import Path
 
+# ---------------------------------------------------------------- 控制台编码
+# Windows 控制台 / CI runner 的默认编码可能是 cp1252（GitHub Actions 就是），
+# 直接 print 中文会抛 UnicodeEncodeError 让构建在第一步就崩掉。
+# 统一把 stdout/stderr 切到 UTF-8，替换不出来的字符而不是炸掉。
+try:
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+except Exception:
+    pass
+
 HERE = Path(__file__).resolve().parent
 NAME = "GaoGaoNetAUTO"
 # 版本号的唯一来源是 version_info.txt（--version-file 直接用它），
@@ -157,6 +167,9 @@ def build(onefile: bool = False, clean: bool = True) -> int:
     # 路径匹配很容易撞车，删目录时更会触发「批量删除」保护。
     #
     # 挪到**同一个盘**下的临时目录（跨盘 rename 会失败）。
+    # 打包成功后再挪回来：否则紧随其后的 make_release.py 找不到 onedir
+    # 产物，portable 包会被静默跳过（CI 就是这么打出「三缺一」的）。
+    stash = None
     if onefile:
         stale = HERE / "dist" / NAME
         if stale.is_dir():
@@ -167,6 +180,7 @@ def build(onefile: bool = False, clean: bool = True) -> int:
                 stale.rename(stash)
                 print(f"  （已暂存旧的 onedir 产物 → {stash}）")
             except Exception as exc:
+                stash = None
                 print(f"  （暂存旧 onedir 失败，将让 PyInstaller 自行处理：{exc}）")
 
     cmd.append(str(HERE / "main.py"))
@@ -178,10 +192,7 @@ def build(onefile: bool = False, clean: bool = True) -> int:
         return proc.returncode
 
     dist = HERE / "dist"
-    if onefile:
-        exe = dist / f"{NAME}.exe"
-    else:
-        exe = dist / NAME / f"{NAME}.exe"
+    exe = _built_exe(onefile)
     if exe.exists():
         size_mb = exe.stat().st_size / 1024 / 1024
         print()
@@ -189,7 +200,23 @@ def build(onefile: bool = False, clean: bool = True) -> int:
     else:
         print(f"! 未找到预期产物: {exe}")
         return 1
+
+    # 把暂存的 onedir 产物挪回原位，保证 make_release.py --all 两种形态都在
+    if stash is not None:
+        target = dist / NAME
+        try:
+            if stash.is_dir() and not target.exists():
+                stash.rename(target)
+                print(f"  （已恢复 onedir 产物 → {target}）")
+        except Exception as exc:
+            print(f"  （恢复 onedir 产物失败：{exc}）")
     return 0
+
+
+def _built_exe(onefile: bool) -> Path:
+    """本次构建产物的准确路径（onedir 与 onefile 位置不同）。"""
+    dist = HERE / "dist"
+    return dist / f"{NAME}.exe" if onefile else dist / NAME / f"{NAME}.exe"
 
 
 def audit(dist_dir: Path) -> int:
@@ -205,15 +232,15 @@ def audit(dist_dir: Path) -> int:
     return proc.returncode
 
 
-def sign(dist_dir: Path) -> int:
-    """调用自签名脚本。"""
+def sign(exe: Path) -> int:
+    """调用自签名脚本（只签本次构建出来的那个 exe）。"""
     script = HERE / "tools" / "sign_release.ps1"
     if not script.exists():
         print("[warn] 找不到 tools/sign_release.ps1，跳过签名")
         return 0
-    exe = dist_dir / NAME / f"{NAME}.exe"
     if not exe.exists():
-        exe = dist_dir / f"{NAME}.exe"
+        print(f"[warn] 找不到待签名文件 {exe}，跳过签名")
+        return 0
     print()
     print("=== 自签名 ===")
     cmd = ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass",
@@ -252,7 +279,7 @@ def main() -> int:
             return arc
 
     if args.sign:
-        return sign(dist)
+        return sign(_built_exe(args.onefile))
     return 0
 
 

@@ -28,11 +28,24 @@ import sys
 import zipfile
 from pathlib import Path
 
+# ---------------------------------------------------------------- 控制台编码
+# Windows 控制台 / CI runner 的默认编码可能是 cp1252（GitHub Actions 就是），
+# 直接 print 中文会抛 UnicodeEncodeError 让构建在第一步就崩掉。
+# 统一把 stdout/stderr 切到 UTF-8，替换不出来的字符而不是炸掉。
+try:
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+except Exception:
+    pass
+
 HERE = Path(__file__).resolve().parent
 NAME = "GaoGaoNetAUTO"
-VERSION = "1.0.1"
+VERSION = "1.0.2"
 
 # 源码包要带的文件
+# ⚠️ 交付包一律用**英文文件名**：中文名上传 GitHub Release 会 HTTP 404
+#    （历史踩过，只能手工改名重传）。给人看的中文说明放在 README / Release 正文里。
+
 SOURCE_FILES = [
     "main.py", "core.py", "webui.py", "tkui.py", "autostart.py",
     "auth.py", "config.py", "vault.py", "logs.py", "icons.py",
@@ -84,7 +97,7 @@ def build_onedir_zip(out_dir: Path) -> Path | None:
     if not (src / f"{NAME}.exe").exists():
         print("[skip] 没有 onedir 产物，先跑 python build_exe.py")
         return None
-    dst = out_dir / f"{NAME}-v{VERSION}-免安装.zip"
+    dst = out_dir / f"{NAME}-v{VERSION}-portable.zip"
     print(f"[1/3] 打包 onedir 免安装包 …")
     _zip_dir(src, dst, NAME, exclude=NEVER_SHIP)
     return dst
@@ -95,7 +108,7 @@ def build_onefile_zip(out_dir: Path) -> Path | None:
     if not src.exists():
         print("[skip] 没有 onefile 产物，先跑 python build_exe.py --onefile")
         return None
-    dst = out_dir / f"{NAME}-v{VERSION}-单文件.zip"
+    dst = out_dir / f"{NAME}-v{VERSION}-singlefile.zip"
     print(f"[2/3] 打包单文件 exe …")
     with zipfile.ZipFile(dst, "w", zipfile.ZIP_DEFLATED, compresslevel=9) as z:
         z.write(src, src.name)
@@ -134,7 +147,7 @@ def build_source_zip(out_dir: Path) -> Path | None:
     if docpkg.is_dir():
         for z in docpkg.glob("*.zip"):
             shutil.copy2(z, stage / z.name)
-    dst = out_dir / f"{NAME}-v{VERSION}-源码绿色包.zip"
+    dst = out_dir / f"{NAME}-v{VERSION}-source.zip"
     print(f"[3/3] 打包源码绿色包 …")
     _zip_dir(stage, dst, f"{NAME}-源码-v{VERSION}")
     shutil.rmtree(stage, ignore_errors=True)

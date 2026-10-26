@@ -24,6 +24,16 @@ import sys
 from pathlib import Path
 from typing import List, Tuple
 
+# ---------------------------------------------------------------- 控制台编码
+# Windows 控制台 / CI runner 的默认编码可能是 cp1252（GitHub Actions 就是），
+# 直接 print 中文会抛 UnicodeEncodeError 让构建在第一步就崩掉。
+# 统一把 stdout/stderr 切到 UTF-8，替换不出来的字符而不是炸掉。
+try:
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+except Exception:
+    pass
+
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent
 

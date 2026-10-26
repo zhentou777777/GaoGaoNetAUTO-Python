@@ -155,7 +155,7 @@ tr:nth-child(even) td{background:rgba(255,255,255,.015)}
 <th>放置位置</th>
 </tr></thead><tbody>
 <tr>
-<td><code>GaoGaoNetAUTO-v1.0.0-免安装.zip</code></td>
+<td><code>GaoGaoNetAUTO-v1.0.2-portable.zip</code></td>
 <td>v1.0.0</td>
 <td>~17.65 MB</td>
 <td>交付时计算</td>
@@ -163,7 +163,7 @@ tr:nth-child(even) td{background:rgba(255,255,255,.015)}
 <td>解压后双击 <code>GaoGaoNetAUTO.exe</code></td>
 </tr>
 <tr>
-<td><code>GaoGaoNetAUTO-v1.0.0-单文件.zip</code></td>
+<td><code>GaoGaoNetAUTO-v1.0.2-singlefile.zip</code></td>
 <td>v1.0.0</td>
 <td>~17.42 MB</td>
 <td>交付时计算</td>
@@ -171,7 +171,7 @@ tr:nth-child(even) td{background:rgba(255,255,255,.015)}
 <td>任意目录</td>
 </tr>
 <tr>
-<td><code>GaoGaoNetAUTO-v1.0.0-源码绿色包.zip</code></td>
+<td><code>GaoGaoNetAUTO-v1.0.2-source.zip</code></td>
 <td>v1.0.0</td>
 <td>~0.27 MB</td>
 <td>交付时计算</td>
@@ -187,7 +187,7 @@ tr:nth-child(even) td{background:rgba(255,255,255,.015)}
 <td>目标机本地</td>
 </tr>
 <tr>
-<td><code>GaoGaoNetAUTO-文档包-v1.0.0.zip</code></td>
+<td><code>GaoGaoNetAUTO-v1.0.2-docs.zip</code></td>
 <td>v1.0.0</td>
 <td>~0.17 MB</td>
 <td>见包内 <code>MANIFEST.txt</code></td>
@@ -197,7 +197,7 @@ tr:nth-child(even) td{background:rgba(255,255,255,.015)}
 </tbody></table>
 <blockquote><p>三个 zip 的 MD5 会随每次改动变化，<strong>以实际交付的包为准</strong>。</p><p>校验：&lt;br&gt;<code>md5sum *.zip</code>（Git Bash）或 <code>Get-FileHash .\*.zip -Algorithm MD5</code>（PowerShell）。&lt;br&gt;</p><p>文档包内含 <code>MANIFEST.txt</code>（每个文件的路径、字节数、MD5），可逐文件核对。</p></blockquote>
 <blockquote><p><strong>三种形态怎么选</strong></p><p>| 场景 | 选哪个 | 原因 |</p><p>|---|---|---|</p><p>| 给终端用户 / 第二台电脑 | <strong>免安装包（onedir）</strong> | 不往 <code>%TEMP%</code> 自解压，Defender 行为特征最干净 |</p><p>| 需要单文件、拷贝方便 | 单文件包 | 启动时会解包到 <code>%TEMP%</code>，误报率略高 |</p><p>| 要改代码 / 目标机没有 Python | 源码绿色包 | 含 <code>setup.bat</code> 一键装依赖 |</p><p><strong>签名状态</strong>：两个 exe 形态均已自签名（<code>CN=Gaogao Campus Auth</code>，SHA256 + 可信时间戳，有效期至 2029-10-25），</p><p>实测 <code>Get-AuthenticodeSignature</code> 返回 <code>Status: Valid</code>。</p><p>⚠️ <strong>默认无需导入证书</strong> —— 被拦时点「更多信息」→「仍要运行」即可；</p><p>导入 <code>.cer</code> 到 <code>TrustedPublisher</code> 只是让「发布者」不显示「未知」，<strong>不要导入根证书库</strong>。</p><p><strong><code>.pfx</code> 私钥与密码文件不随包分发</strong>（已在校验中排除）。</p></blockquote>
-<blockquote><p><strong>校验方法</strong>（PowerShell）：</p><p>```powershell</p><p>Get-FileHash .\GaoGaoNetAUTO-v1.0.0-免安装.zip -Algorithm MD5</p><p>```</p><p>或 Git Bash：<code>md5sum GaoGaoNetAUTO-v1.0.0-免安装.zip</code></p></blockquote>
+<blockquote><p><strong>校验方法</strong>（PowerShell）：</p><p>```powershell</p><p>Get-FileHash .\GaoGaoNetAUTO-v1.0.2-portable.zip -Algorithm MD5</p><p>```</p><p>或 Git Bash：<code>md5sum GaoGaoNetAUTO-v1.0.2-portable.zip</code></p></blockquote>
 <blockquote><p><strong>交付包位置</strong>：项目内 <code>release/</code> 目录（<code>make_release.py</code> / <code>make_docs_package.py</code> 的默认输出）。</p><p>构建产物<strong>不写桌面</strong> —— 桌面是使用者的私人空间，需要成品时自己从这里取。</p></blockquote>
 <h3>0.3 交接确认表</h3>
 <table><thead><tr>
@@ -315,28 +315,28 @@ tr:nth-child(even) td{background:rgba(255,255,255,.015)}
 </tr></thead><tbody>
 <tr>
 <td><strong>A. 目录版（推荐）</strong></td>
-<td><code>GaoGaoNetAUTO-v1.0.0-免安装.zip</code></td>
+<td><code>GaoGaoNetAUTO-v1.0.2-portable.zip</code></td>
 <td>否</td>
 <td><strong>最低</strong></td>
 <td>第二台电脑、有杀软的机器</td>
 </tr>
 <tr>
 <td>B. 单文件版</td>
-<td><code>GaoGaoNetAUTO-v1.0.0-单文件.zip</code></td>
+<td><code>GaoGaoNetAUTO-v1.0.2-singlefile.zip</code></td>
 <td>否</td>
 <td>较高</td>
 <td>习惯单文件、能处理拦截</td>
 </tr>
 <tr>
 <td>C. 源码绿色包</td>
-<td><code>GaoGaoNetAUTO-v1.0.0-源码绿色包.zip</code></td>
+<td><code>GaoGaoNetAUTO-v1.0.2-source.zip</code></td>
 <td>是</td>
 <td>最低</td>
 <td>想改代码 / 无杀软环境</td>
 </tr>
 </tbody></table>
 <h4>A. 目录版（主推）</h4>
-<ol><li>解压 <code>GaoGaoNetAUTO-v1.0.0-免安装.zip</code> 到任意目录（建议 <code>D:\Tools\GaoGaoNetAUTO</code>）。</li><li><strong>先解除下载锁定</strong>（否则 Defender 仍会拦）：</li></ol>
+<ol><li>解压 <code>GaoGaoNetAUTO-v1.0.2-portable.zip</code> 到任意目录（建议 <code>D:\Tools\GaoGaoNetAUTO</code>）。</li><li><strong>先解除下载锁定</strong>（否则 Defender 仍会拦）：</li></ol>
 <p>``<code>powershell Get-ChildItem -Recurse -Include *.exe,*.dll,*.pyd | Unblock-File </code>`` 或右键 exe → 属性 → 底部勾选「解除锁定」→ 确定。</p>
 <ol><li><strong>导入签名证书</strong>（<strong>可选</strong>，仅当 exe 被拦且需要显示「已信任」时）：</li></ol>
 <p>``<code>powershell # 管理员 PowerShell —— 只导入到 TrustedPublisher，不要导入 Root Import-Certificate -FilePath .\GaoGaoNetAUTO-sign.cer -CertStoreLocation Cert:\LocalMachine\TrustedPublisher </code>`<code> &gt; ⚠️ **不要导入 </code>Cert:\LocalMachine\Root`<strong>（根证书库）——自签名证书进根库等于给这台机器装了一个可签任意代码的根，风险远大于收益。 &gt; 默认路径其实是：双击 exe → 点「更多信息」→「仍要运行」，</strong>无需动证书库**。</p>
@@ -1016,17 +1016,17 @@ Import-Certificate -FilePath .\GaoGaoNetAUTO-sign.cer -CertStoreLocation Cert:\L
 <th>说明</th>
 </tr></thead><tbody>
 <tr>
-<td><code>GaoGaoNetAUTO-v1.0.0-免安装.zip</code></td>
+<td><code>GaoGaoNetAUTO-v1.0.2-portable.zip</code></td>
 <td>✅</td>
 <td><strong>目录版，推荐</strong>（含 <code>.cer</code>）</td>
 </tr>
 <tr>
-<td><code>GaoGaoNetAUTO-v1.0.0-单文件.zip</code></td>
+<td><code>GaoGaoNetAUTO-v1.0.2-singlefile.zip</code></td>
 <td>✅</td>
 <td>单文件版（含 <code>.cer</code>）</td>
 </tr>
 <tr>
-<td><code>GaoGaoNetAUTO-v1.0.0-源码绿色包.zip</code></td>
+<td><code>GaoGaoNetAUTO-v1.0.2-source.zip</code></td>
 <td>✅</td>
 <td>源码绿色包</td>
 </tr>

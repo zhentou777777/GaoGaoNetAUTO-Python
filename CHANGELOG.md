@@ -6,7 +6,7 @@
 
 ---
 
-## [未发布] — 2026-10-26
+## [1.0.2] — 2026-10-26
 
 ### 修复
 
@@ -31,14 +31,42 @@
   被误报成「手机号格式不正确」。
 - `save_settings()` 校验了 `scheme` 却从不保存它。
 
+### CI 与构建
+
+- **CI 从来没成功过**：两次 run 都挂在
+  `UnicodeEncodeError: 'charmap' codec can't encode` —— runner 的控制台是
+  cp1252，`build_exe.py` 第一句 `print("=== 环境自检 ===")` 就崩了。
+  `build_exe.py` / `make_release.py` / `make_docs_package.py` /
+  `tools/audit_features.py` 统一把 stdout/stderr 切到 UTF-8，
+  workflow 里也加 `PYTHONUTF8=1`。
+- **onefile 打包会把 onedir 产物挪走且不还原**，紧随其后的
+  `make_release.py --all` 找不到 onedir，`portable.zip` 被静默跳过
+  （CI 的步骤顺序正好踩中）。现在打包成功后自动挪回。
+- **`--sign` 之前会签错文件**：onefile 构建完成后 `dist/NAME/` 也在，
+  签的却是 onedir 里那个 exe。改成显式传入本次构建产物路径。
+- **交付包改用英文文件名**：`-portable.zip` / `-singlefile.zip` /
+  `-source.zip` / `-docs.zip`。中文名上传 GitHub Release 会 HTTP 404，
+  以前每次发版都得手工改名重传。
+- **CI 不再默认自动发布**：正式包是本地用 `tools/sign_release.ps1` 签名后
+  上传的（还带 `.cer` 与文档包），CI 产物没签名，自动发布会把已签名附件
+  覆盖成未签名版本。需要时在仓库 Variables 里设 `PUBLISH_RELEASE=true`。
+
+### 扫码
+
+- **轮询不再压测网关**：`poll()` 每 2 秒都会发一次真实认证请求
+  `auth?str=`，还会跑一轮 3 个地址的连通性探测，10 分钟能发出几百次请求。
+  现在 `auth?str=` 最多每 15 秒一次（生成后先留 5 秒给用户扫），
+  `probe_online()` 最多每 4 秒一次。
+
 ### 测试
 
-- pytest 75 → **80 项**。
+- pytest 75 → **84 项**。
 - **测试会清掉用户真实凭据**（高危）：`TestCoreController` 直接 `Config()`，
   读写的是 `%LOCALAPPDATA%` 里的**真实配置**，其中 `test_account_masked` 收尾调
   `clear_credentials()` —— 在开发机上跑一次测试，用户保存的 Token / 手机号 / 密码
   就没了。新增 `tests/conftest.py`，把所有测试的数据目录锁定到临时目录。
-- 修复项回归测试集中放在 `tests/test_regressions.py`。
+- 修复项回归测试集中放在 `tests/test_regressions.py`
+  （含扫码轮询节流、交付包文件名必须是 ASCII、构建脚本必须切 UTF-8 三项）。
 
 ### 仓库
 
@@ -47,6 +75,7 @@
 - README 重写：补上缺失的标题与一句话简介，正文压缩到原来的一半，
   深度内容交给 `docs/`。
 - `.gitignore` 整理：补 `.pytest_cache/`、`config.json.bak`、`logs/`，去掉重复条目。
+- 版本号 1.0.1 → 1.0.2（`version_info.txt` / `make_release.py` / `make_docs_package.py` 三处同步）。
 - `build_exe.py`：修掉两处 UTF-8 乱码，删掉与 `version_info.txt` 不同步的
   `VERSION` 常量（exe 属性里写的是旧版本号）。
 

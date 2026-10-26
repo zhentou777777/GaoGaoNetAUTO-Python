@@ -13,6 +13,12 @@ jobs:
     permissions:
       contents: write
 
+    # runner 的控制台是 cp1252，脚本里 print 中文会 UnicodeEncodeError
+    # 让构建在第一步就崩掉（v1.0.0 / v1.0.1 的两次 CI 都是这么挂的）。
+    env:
+      PYTHONUTF8: "1"
+      PYTHONIOENCODING: "utf-8"
+
     steps:
       - uses: actions/checkout@v4
 
@@ -69,8 +75,14 @@ jobs:
             dist/packages/SHA256SUMS.txt
           if-no-files-found: error
 
+      # ── 发布 ────────────────────────────────────────────────────
+      # 默认**不自动发布**：正式交付包是用 tools/sign_release.ps1 在本地签名
+      # 之后手工上传的（还带 .cer 与文档包），CI 产物没签名，自动发布会把
+      # 已签名的同名附件覆盖成未签名版本。
+      # 确实想让 CI 直接发，就在仓库 Settings → Variables 里加
+      # PUBLISH_RELEASE=true。
       - name: 发布到 Release
-        if: startsWith(github.ref, 'refs/tags/')
+        if: startsWith(github.ref, 'refs/tags/') && vars.PUBLISH_RELEASE == 'true'
         uses: softprops/action-gh-release@v2
         with:
           files: |

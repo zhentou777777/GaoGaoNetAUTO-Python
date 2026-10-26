@@ -186,11 +186,11 @@ tr:nth-child(even) td{background:rgba(255,255,255,.015)}
 <p><strong>方案 2：只排除这一个文件（不排除整个目录）</strong></p>
 <p>如果每次运行都被拦，可以用 Defender 的<strong>文件级排除</strong>。注意用 <code>Add-MpPreference -ExclusionPath</code> 排除的是<strong>路径</strong>，粒度最粗是目录； 想更精确就排除具体文件：</p>
 <pre><code># 管理员 PowerShell —— 只排除这一个 zip / exe，不要排除整个下载目录
-Add-MpPreference -ExclusionPath &quot;D:\Downloads\GaoGaoNetAUTO-v1.0.0-免安装.zip&quot;
+Add-MpPreference -ExclusionPath &quot;D:\Downloads\GaoGaoNetAUTO-v1.0.2-portable.zip&quot;
 
 # 确认已生效
 Get-MpPreference | Select-Object -ExpandProperty ExclusionPath</code></pre>
-<blockquote><p>⚠️ <strong>不要排除整个磁盘或整个下载目录</strong> —— 那等于给这一整块地方开了免检区，</p><p>任何落进去的可执行文件都不再被检查。<strong>排除范围越窄越好</strong>，</p><p>理想情况是排除这一个具体文件。</p><p>❌ <code>Add-MpPreference -ExclusionPath &quot;D:\Downloads&quot;</code>   ← 范围过大，不推荐</p><p>✅ <code>Add-MpPreference -ExclusionPath &quot;D:\Downloads\GaoGaoNetAUTO-v1.0.0-免安装.zip&quot;</code>  ← 精确到文件</p></blockquote>
+<blockquote><p>⚠️ <strong>不要排除整个磁盘或整个下载目录</strong> —— 那等于给这一整块地方开了免检区，</p><p>任何落进去的可执行文件都不再被检查。<strong>排除范围越窄越好</strong>，</p><p>理想情况是排除这一个具体文件。</p><p>❌ <code>Add-MpPreference -ExclusionPath &quot;D:\Downloads&quot;</code>   ← 范围过大，不推荐</p><p>✅ <code>Add-MpPreference -ExclusionPath &quot;D:\Downloads\GaoGaoNetAUTO-v1.0.2-portable.zip&quot;</code>  ← 精确到文件</p></blockquote>
 <p><strong>方案 3：临时关闭实时保护（仅限你完全确认来源时）</strong></p>
 <pre><code>Set-MpPreference -DisableRealtimeMonitoring $true
 # 下载完成后务必改回来
@@ -199,8 +199,8 @@ Set-MpPreference -DisableRealtimeMonitoring $false</code></pre>
 <p><strong>方案 4（长期正解）：让下载方加签名</strong> 用 Azure Trusted Signing 签的包，Defender 不会在下载阶段拦。长期方案见 §6。</p>
 <h3>2.3 顺手检查：MOTW（Mark of the Web）</h3>
 <p>从浏览器/微信下载的文件带 <code>Zone.Identifier</code> 标记，Windows 会额外弹「安全警告」。解除：</p>
-<pre><code>Unblock-File -Path &quot;D:\Downloads\GaoGaoNetAUTO-文档包-v1.0.0.zip&quot;
-Get-Item &quot;D:\Downloads\GaoGaoNetAUTO-文档包-v1.0.0.zip&quot; -Stream *   # 确认已无 Zone.Identifier</code></pre>
+<pre><code>Unblock-File -Path &quot;D:\Downloads\GaoGaoNetAUTO-v1.0.2-docs.zip&quot;
+Get-Item &quot;D:\Downloads\GaoGaoNetAUTO-v1.0.2-docs.zip&quot; -Stream *   # 确认已无 Zone.Identifier</code></pre>
 <hr>
 <h2 id="3-情况-b-运行被拦-情况-c-运行时被杀">3. 情况 B：运行被拦 / 情况 C：运行时被杀</h2>
 <h3>3.1 情况 B —— 「Windows 已保护你的电脑」</h3>
