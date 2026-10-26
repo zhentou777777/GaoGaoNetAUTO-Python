@@ -100,7 +100,7 @@ Token 只在糕糕 APP 的流量里）。
 git clone https://github.com/zhentou777777/GaoGaoNetAUTO-Python.git
 cd GaoGaoNetAUTO-Python
 pip install -r requirements.txt
-python main.py          # 默认 Web 界面；加 --tk 走旧版 Tk 窗口
+python main.py          # 默认 Web 界面；加 --tk 走旧版 Tk 窗口（仅源码运行）
 ```
 
 **自己打包**

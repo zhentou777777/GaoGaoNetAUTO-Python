@@ -85,6 +85,14 @@
   根目录现在只剩**运行时模块**，`tools/README.md` 里有一张「这脚本是干嘛的」表。
 - 脚本移走后 `HERE` 改为指向项目根（`parent.parent`）；`build_exe.py` 额外把
   项目根插进 `sys.path`，否则 `import icons` 会失败（图标静默不生成）。
+- **`tkui.py` → `legacy/tkui.py`**：旧版 Tk 界面只是「没浏览器时的兜底」，
+  2147 行不该占着根目录。`--tk` 改为**仅源码运行可用**（打包版只带 Web 界面，
+  Tk 要拖进整套 tcl/tk），并在打包版里给出明确提示而不是
+  ModuleNotFoundError —— 顺带修掉一个隐藏 bug：惰性 import 从来没被打包器
+  静态分析抓到，打包版的 `--tk` 其实是坏的。
+- **`docs/*.html` 不再入库**：那是 `docs/build_html.py` 从 Markdown 生成的副本，
+  入库只会和 md 打架（改一次文档要记得重建，忘了就是旧内容）。
+  改成 `tools/make_docs_package.py` 打包前自动生成。
 - `build_exe.py`：修掉两处 UTF-8 乱码，删掉与 `version_info.txt` 不同步的
   `VERSION` 常量（exe 属性里写的是旧版本号）。
 

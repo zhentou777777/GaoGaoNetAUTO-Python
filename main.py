@@ -4,7 +4,7 @@
 默认启动 **Web 界面**：起一个只监听 127.0.0.1 的本地服务，
 用浏览器显示（``webui.py`` + ``core.py``）。
 
-加 ``--tk`` 参数走旧版 Tk 界面（``tkui.py``），作为无浏览器环境的兜底。
+加 ``--tk`` 参数走旧版 Tk 界面（``legacy/tkui.py``），作为无浏览器环境的兜底。
 
 业务逻辑在 ``core.py``，两种界面共用同一套认证行为。
 """
@@ -64,9 +64,19 @@ def _run_web_ui(silent: bool) -> int:
 
 
 def _run_tk_ui(silent: bool) -> int:
-    """旧版 Tk 界面（``--tk``）。"""
-    from tkui import run_tk_ui
+    """旧版 Tk 界面（``--tk``）。
 
+    只在**源码运行**时可用：打包版只带 Web 界面。Tk 界面要拖进整套
+    tcl/tk，体积大，而且只是「没有浏览器时的兜底」，不值得让每个用户的
+    包都胖一圈。它是惰性 import，PyInstaller 的静态分析也抓不到，
+    所以这里显式给出人话提示，而不是甩一个莫名的 ModuleNotFoundError。
+    """
+    try:
+        from legacy.tkui import run_tk_ui
+    except ImportError:
+        print("当前是打包版，只带 Web 界面（旧版 Tk 界面没有打进来）。")
+        print("想用 Tk 界面请从源码运行：python main.py --tk")
+        return 2
     return run_tk_ui(silent)
 
 

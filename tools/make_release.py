@@ -48,13 +48,13 @@ VERSION = "1.0.2"
 #    （历史踩过，只能手工改名重传）。给人看的中文说明放在 README / Release 正文里。
 
 SOURCE_FILES = [
-    "main.py", "core.py", "webui.py", "tkui.py", "autostart.py",
+    "main.py", "core.py", "webui.py", "autostart.py",
     "auth.py", "config.py", "vault.py", "logs.py", "icons.py",
     "netguard.py", "netprobe_win.py", "qrflow.py", "acclogin.py", "taskbar.py",
     "requirements.txt", "README.md", "CHANGELOG.md", "LICENSE",
     "version_info.txt",
 ]
-SOURCE_DIRS = ["assets", "docs", "tools", "webui"]
+SOURCE_DIRS = ["assets", "docs", "legacy", "tools", "webui"]
 
 
 def md5(path: Path) -> str:

@@ -26,6 +26,10 @@ capture.json
 capture.log
 apk_js/
 
+# 文档 HTML 是 docs/build_html.py 从 Markdown 生成的副本，不入库；
+# 出文档包时由 tools/make_docs_package.py 自动生成。
+docs/*.html
+
 # ---------------------------------------------------------------- 敏感文件
 # 签名私钥与口令（只发布 .cer 公钥证书）
 *.pfx

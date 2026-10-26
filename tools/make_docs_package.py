@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import hashlib
 import shutil
+import subprocess
 import sys
 import zipfile
 from pathlib import Path
@@ -322,7 +323,25 @@ def md5(path: Path) -> str:
     return h.hexdigest()
 
 
+def _ensure_html() -> None:
+    """先把 Markdown 文档渲染成 HTML。
+
+    ``docs/*.html`` **不进版本库**（是生成物，入库只会和 md 打架），
+    所以每次出文档包之前都在本地重新生成一遍，保证 HTML 永远跟得上 md。
+    """
+    script = DOCS / "build_html.py"
+    if not script.exists():
+        print("[warn] 找不到 docs/build_html.py，跳过 HTML 生成")
+        return
+    print("· 生成 HTML 版文档…")
+    proc = subprocess.run([sys.executable, str(script)],
+                          cwd=str(HERE), check=False)
+    if proc.returncode != 0:
+        print("[warn] HTML 生成失败，文档包里将只有 Markdown")
+
+
 def main() -> int:
+    _ensure_html()
     if OUT_DIR.exists():
         shutil.rmtree(OUT_DIR)
     OUT_DIR.mkdir(parents=True, exist_ok=True)

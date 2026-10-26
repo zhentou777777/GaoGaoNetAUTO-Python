@@ -236,7 +236,7 @@ class TestGuiSmoke:
     def app(self):
         import tkinter as tk
 
-        from tkui import App
+        from legacy.tkui import App
 
         try:
             root = tk.Tk()
@@ -275,7 +275,7 @@ class TestGuiSmoke:
 
     def test_reenable_is_safe_without_button(self):
         """没有按钮时 _reenable 不能抛异常。"""
-        from tkui import App
+        from legacy.tkui import App
 
         a = App.__new__(App)
         a.btn_login = None
@@ -304,7 +304,7 @@ class TestGuiSmoke:
             asked["n"] += 1
             return False
 
-        import tkui as main_mod
+        import legacy.tkui as main_mod
 
         monkeypatch.setattr(main_mod.messagebox, "askyesno", fake_ask)
         monkeypatch.setattr(app.cfg, "get_token", lambda: "tok")
@@ -342,7 +342,7 @@ class TestTokenHelpWindow:
     def test_help_window_opens(self):
         import tkinter as tk
 
-        from tkui import App
+        from legacy.tkui import App
 
         try:
             root = tk.Tk()
@@ -729,7 +729,7 @@ class TestAccountBreaker:
 
     @needs_tk
     def test_breaker_trips_after_threshold(self, tmp_path, monkeypatch):
-        import tkui as main_mod
+        import legacy.tkui as main_mod
 
         monkeypatch.setenv("GAOGAO_DATA_DIR", str(tmp_path))
         app = main_mod.App.__new__(main_mod.App)
@@ -744,7 +744,7 @@ class TestAccountBreaker:
 
     @needs_tk
     def test_breaker_resets_on_success(self, tmp_path, monkeypatch):
-        import tkui as main_mod
+        import legacy.tkui as main_mod
 
         monkeypatch.setenv("GAOGAO_DATA_DIR", str(tmp_path))
         app = main_mod.App.__new__(main_mod.App)
@@ -761,7 +761,7 @@ class TestAccountBreaker:
 
     @needs_tk
     def test_breaker_expires(self, tmp_path, monkeypatch):
-        import tkui as main_mod
+        import legacy.tkui as main_mod
         import time as time_mod
 
         monkeypatch.setenv("GAOGAO_DATA_DIR", str(tmp_path))
