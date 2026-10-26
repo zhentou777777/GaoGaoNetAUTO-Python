@@ -238,7 +238,10 @@ class TestGuiSmoke:
 
         from tkui import App
 
-        root = tk.Tk()
+        try:
+            root = tk.Tk()
+        except Exception as exc:  # TclError: 该环境没有可用的 Tk
+            pytest.skip(f"无可用 GUI 环境：{exc}")
         root.withdraw()
         a = App.__new__(App)
         # 只做界面构建，不启动网络线程
@@ -341,7 +344,10 @@ class TestTokenHelpWindow:
 
         from tkui import App
 
-        root = tk.Tk()
+        try:
+            root = tk.Tk()
+        except Exception as exc:  # TclError: 该环境没有可用的 Tk
+            pytest.skip(f"无可用 GUI 环境：{exc}")
         root.withdraw()
         a = App.__new__(App)
         a.root = root
