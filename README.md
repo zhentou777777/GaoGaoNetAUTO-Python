@@ -7,7 +7,7 @@
 ![license](https://img.shields.io/badge/license-MIT-green)
 [![release](https://img.shields.io/github/v/release/zhentou777777/GaoGaoNetAUTO-Python)](https://github.com/zhentou777777/GaoGaoNetAUTO-Python/releases)
 
-- 只依赖标准库风格的本地网页界面（`127.0.0.1` + 一次性令牌），无框架、无 CDN、离线可用
+- 界面是本地网页（`127.0.0.1` + 一次性令牌），服务端只用标准库 `http.server`，无框架、无 CDN、离线可用
 - Token / 手机号 / 密码用 **Windows DPAPI** 加密落盘，配置文件里只有密文
 - 账号密码可自动续 Token，断网、换网络、Token 轮换都能自愈，不需要重新抓包
 
