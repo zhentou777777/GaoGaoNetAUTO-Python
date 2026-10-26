@@ -198,7 +198,7 @@ tr:nth-child(even) td{background:rgba(255,255,255,.015)}
 <blockquote><p>三个 zip 的 MD5 会随每次改动变化，<strong>以实际交付的包为准</strong>。</p><p>校验：&lt;br&gt;<code>md5sum *.zip</code>（Git Bash）或 <code>Get-FileHash .\*.zip -Algorithm MD5</code>（PowerShell）。&lt;br&gt;</p><p>文档包内含 <code>MANIFEST.txt</code>（每个文件的路径、字节数、MD5），可逐文件核对。</p></blockquote>
 <blockquote><p><strong>三种形态怎么选</strong></p><p>| 场景 | 选哪个 | 原因 |</p><p>|---|---|---|</p><p>| 给终端用户 / 第二台电脑 | <strong>免安装包（onedir）</strong> | 不往 <code>%TEMP%</code> 自解压，Defender 行为特征最干净 |</p><p>| 需要单文件、拷贝方便 | 单文件包 | 启动时会解包到 <code>%TEMP%</code>，误报率略高 |</p><p>| 要改代码 / 目标机没有 Python | 源码绿色包 | 含 <code>setup.bat</code> 一键装依赖 |</p><p><strong>签名状态</strong>：两个 exe 形态均已自签名（<code>CN=Gaogao Campus Auth</code>，SHA256 + 可信时间戳，有效期至 2029-10-25），</p><p>实测 <code>Get-AuthenticodeSignature</code> 返回 <code>Status: Valid</code>。</p><p>⚠️ <strong>默认无需导入证书</strong> —— 被拦时点「更多信息」→「仍要运行」即可；</p><p>导入 <code>.cer</code> 到 <code>TrustedPublisher</code> 只是让「发布者」不显示「未知」，<strong>不要导入根证书库</strong>。</p><p><strong><code>.pfx</code> 私钥与密码文件不随包分发</strong>（已在校验中排除）。</p></blockquote>
 <blockquote><p><strong>校验方法</strong>（PowerShell）：</p><p>```powershell</p><p>Get-FileHash .\GaoGaoNetAUTO-v1.0.2-portable.zip -Algorithm MD5</p><p>```</p><p>或 Git Bash：<code>md5sum GaoGaoNetAUTO-v1.0.2-portable.zip</code></p></blockquote>
-<blockquote><p><strong>交付包位置</strong>：项目内 <code>release/</code> 目录（<code>make_release.py</code> / <code>make_docs_package.py</code> 的默认输出）。</p><p>构建产物<strong>不写桌面</strong> —— 桌面是使用者的私人空间，需要成品时自己从这里取。</p></blockquote>
+<blockquote><p><strong>交付包位置</strong>：项目内 <code>release/</code> 目录（<code>tools/make_release.py</code> / <code>tools/make_docs_package.py</code> 的默认输出）。</p><p>构建产物<strong>不写桌面</strong> —— 桌面是使用者的私人空间，需要成品时自己从这里取。</p></blockquote>
 <h3>0.3 交接确认表</h3>
 <table><thead><tr>
 <th>#</th>
@@ -214,7 +214,7 @@ tr:nth-child(even) td{background:rgba(255,255,255,.015)}
 </tr>
 <tr>
 <td>2</td>
-<td>打包脚本 <code>build_exe.py</code> + CI 定义 <code>.github/workflows/build_windows.yml</code></td>
+<td>打包脚本 <code>tools/build_exe.py</code> + CI 定义 <code>.github/workflows/build_windows.yml</code></td>
 <td>✅ 已交付</td>
 <td>☐</td>
 </tr>
@@ -642,24 +642,24 @@ Import-Certificate -FilePath .\GaoGaoNetAUTO-sign.cer -CertStoreLocation Cert:\L
 <td><code>acquire_single_instance()</code> / <code>set_tool_window()</code></td>
 </tr>
 <tr>
-<td><code>capture.py</code></td>
+<td><code>tools/capture.py</code></td>
 <td>一次性逆向工具（playwright）抓认证页真实请求（<strong>凭据自动脱敏</strong>）</td>
 <td>产出 <code>capture.json</code></td>
 </tr>
 <tr>
-<td><code>tokenlab.py</code></td>
+<td><code>tools/tokenlab.py</code></td>
 <td>Token 寿命实测实验脚本</td>
 <td>命令行独立运行</td>
 </tr>
 <tr>
-<td><code>login_check.py</code></td>
+<td><code>tools/login_check.py</code></td>
 <td>账号密码登录接口自检脚本（<strong>密码走交互输入</strong>）</td>
-<td><code>python login_check.py</code></td>
+<td><code>python tools/login_check.py</code></td>
 </tr>
 <tr>
-<td><code>build_exe.py</code></td>
+<td><code>tools/build_exe.py</code></td>
 <td>PyInstaller 打包（<strong>审计不通过即中止</strong>）</td>
-<td><code>python build_exe.py</code></td>
+<td><code>python tools/build_exe.py</code></td>
 </tr>
 <tr>
 <td><code>docs/build_html.py</code></td>
@@ -808,7 +808,7 @@ Import-Certificate -FilePath .\GaoGaoNetAUTO-sign.cer -CertStoreLocation Cert:\L
 <tr>
 <td><code>--noupx</code></td>
 <td>UPX 壳是 Defender ML 头号命中点</td>
-<td><code>build_exe.py</code></td>
+<td><code>tools/build_exe.py</code></td>
 <td>✅</td>
 </tr>
 <tr>
@@ -820,7 +820,7 @@ Import-Certificate -FilePath .\GaoGaoNetAUTO-sign.cer -CertStoreLocation Cert:\L
 <tr>
 <td><strong>onedir 为默认</strong></td>
 <td>不再自解压到 <code>%TEMP%</code></td>
-<td><code>build_exe.py</code></td>
+<td><code>tools/build_exe.py</code></td>
 <td>✅</td>
 </tr>
 <tr>
@@ -873,7 +873,7 @@ py -3 -m venv .venv
 # 4) 生成交付包（三种形态，默认输出到项目内 release/）
 .\.venv\Scripts\python.exe make_release.py --all</code></pre>
 <p>产物：<code>dist/GaoGaoNetAUTO/</code>（onedir 目录）或 <code>dist/GaoGaoNetAUTO.exe</code>（onefile）。</p>
-<blockquote><p>⚠️ <strong>tkinter 是硬依赖</strong>。精简版 Python、conda base、多数 CI 容器镜像都不带 tkinter，</p><p>而 PyInstaller <strong>不会报错</strong>——能打出 exe，一运行就 <code>ModuleNotFoundError</code>。</p><p><code>build_exe.py</code> 已内置环境自检，打包前就会拦下并提示换 Python。</p><p>本机使用的构建环境：<code>D:\py\python.exe</code>（Python 3.11.0rc2 + tkinter 8.6）。</p></blockquote>
+<blockquote><p>⚠️ <strong>tkinter 是硬依赖</strong>。精简版 Python、conda base、多数 CI 容器镜像都不带 tkinter，</p><p>而 PyInstaller <strong>不会报错</strong>——能打出 exe，一运行就 <code>ModuleNotFoundError</code>。</p><p><code>tools/build_exe.py</code> 已内置环境自检，打包前就会拦下并提示换 Python。</p><p>本机使用的构建环境：<code>D:\py\python.exe</code>（Python 3.11.0rc2 + tkinter 8.6）。</p></blockquote>
 <h3>3.2 打包参数逐条解释</h3>
 <table><thead><tr>
 <th>参数</th>
@@ -937,9 +937,9 @@ py -3 -m venv .venv
 环境：windows-latest, Python 3.11
 步骤：checkout → setup-python → pip install -r requirements.txt
      → python -m pytest tests/
-     → python build_exe.py            （内部含产物特征审计，审计失败即构建失败）
-     → python build_exe.py --onefile
-     → python make_release.py --all --out dist/packages
+     → python tools/build_exe.py            （内部含产物特征审计，审计失败即构建失败）
+     → python tools/build_exe.py --onefile
+     → python tools/make_release.py --all --out dist/packages
      → 生成 SHA256SUMS.txt → upload-artifact
      → （仅 tag）softprops/action-gh-release 发布 Release</code></pre>
 <p><strong>审计门禁</strong>：产物若命中 UPX / onefile 自解压 / 注册表自启动 / 注入类 API， CI 会直接失败，不会把误报版本发到用户手里。</p>
@@ -961,8 +961,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools\sign_release.ps1 `
 <p>没装 SDK 时回退到 PowerShell 的 <code>Set-AuthenticodeSignature</code>（Authenticode 时间戳）</p>
 <ol><li><strong>校验</strong>并打印签名状态、主题、有效期</li></ol>
 <p>也可以打包时一步到位：</p>
-<pre><code>python build_exe.py --sign</code></pre>
-<blockquote><p><strong>关键点</strong></p><p>- <code>2.5.29.37={text}1.3.6.1.5.5.7.3.3</code> 是 <strong>EKU = Code Signing</strong>，缺它 Windows 不认这是代码签名证书。</p><p>- <strong>时间戳必带</strong>。没有时间戳，证书 3 年到期后签名直接失效，装到别人机器上照样报「签名无效」。</p><p>- <code>.pfx</code>（私钥）与 <code>pfx-password.txt</code> <strong>绝不随包分发</strong>。<code>make_release.py</code> 已在打包时排除，</p><p>CI 与发布流程也要守住这条线。</p></blockquote>
+<pre><code>python tools/build_exe.py --sign</code></pre>
+<blockquote><p><strong>关键点</strong></p><p>- <code>2.5.29.37={text}1.3.6.1.5.5.7.3.3</code> 是 <strong>EKU = Code Signing</strong>，缺它 Windows 不认这是代码签名证书。</p><p>- <strong>时间戳必带</strong>。没有时间戳，证书 3 年到期后签名直接失效，装到别人机器上照样报「签名无效」。</p><p>- <code>.pfx</code>（私钥）与 <code>pfx-password.txt</code> <strong>绝不随包分发</strong>。<code>tools/make_release.py</code> 已在打包时排除，</p><p>CI 与发布流程也要守住这条线。</p></blockquote>
 <h4>目标机导入证书（管理员 PowerShell，<strong>可选</strong>）</h4>
 <pre><code># 只导入 TrustedPublisher；不要导入根证书库（风险远大于收益）
 Import-Certificate -FilePath .\GaoGaoNetAUTO-sign.cer -CertStoreLocation Cert:\LocalMachine\TrustedPublisher</code></pre>
@@ -1270,12 +1270,12 @@ Import-Certificate -FilePath .\GaoGaoNetAUTO-sign.cer -CertStoreLocation Cert:\L
 </tr>
 <tr>
 <td>自检脚本</td>
-<td><code>python login_check.py &lt;手机号&gt; &lt;密码&gt;</code></td>
+<td><code>python tools/login_check.py &lt;手机号&gt; &lt;密码&gt;</code></td>
 <td>验证账号密码换 Token 链路（不保存凭据）</td>
 </tr>
 <tr>
 <td>Token 实验</td>
-<td><code>python tokenlab.py</code></td>
+<td><code>python tools/tokenlab.py</code></td>
 <td>实测 Token 寿命</td>
 </tr>
 </tbody></table>
@@ -1310,7 +1310,7 @@ Import-Certificate -FilePath .\GaoGaoNetAUTO-sign.cer -CertStoreLocation Cert:\L
 <td><strong>F-01</strong></td>
 <td>状态卡显示已认证但<strong>不能上网</strong></td>
 <td>① 看日志是「认证成功」还是「认证接口返回了网页内容」；② 浏览器访问网关 host 看是否被门户拦截</td>
-<td>① 确认连的是校园网；② 检查 host/port；③ 断开代理/VPN；④ 用 <code>login_check.py</code> 验证网关可达</td>
+<td>① 确认连的是校园网；② 检查 host/port；③ 断开代理/VPN；④ 用 <code>tools/login_check.py</code> 验证网关可达</td>
 <td>浏览器能打开任意外网</td>
 </tr>
 <tr>
@@ -1487,7 +1487,7 @@ Import-Certificate -FilePath .\GaoGaoNetAUTO-sign.cer -CertStoreLocation Cert:\L
 <td>L0 自愈可能取不到 Token</td>
 <td>中</td>
 <td>待验证</td>
-<td><code>_pick_token()</code> 已多命名兼容 + JWT 兜底；用真实账号跑 <code>login_check.py</code> 确认</td>
+<td><code>_pick_token()</code> 已多命名兼容 + JWT 兜底；用真实账号跑 <code>tools/login_check.py</code> 确认</td>
 </tr>
 <tr>
 <td><strong>K-04</strong></td>
@@ -1595,7 +1595,7 @@ Import-Certificate -FilePath .\GaoGaoNetAUTO-sign.cer -CertStoreLocation Cert:\L
 </tr>
 <tr>
 <td><strong>K-17</strong></td>
-<td><code>login_check.py</code> 口令走命令行</td>
+<td><code>tools/login_check.py</code> 口令走命令行</td>
 <td>同机其他账号可见进程列表</td>
 <td>中</td>
 <td><strong>已修复</strong></td>
@@ -1734,7 +1734,7 @@ Import-Certificate -FilePath .\GaoGaoNetAUTO-sign.cer -CertStoreLocation Cert:\L
 </tr>
 <tr>
 <td>H2</td>
-<td>真实账号跑 <code>login_check.py</code> 确认 Token 字段</td>
+<td>真实账号跑 <code>tools/login_check.py</code> 确认 Token 字段</td>
 <td>开发</td>
 <td>1 周内</td>
 <td>需真实账号</td>
@@ -1960,20 +1960,20 @@ Import-Certificate -FilePath .\GaoGaoNetAUTO-sign.cer -CertStoreLocation Cert:\L
 <hr>
 <h2 id="附录-d-命令速查">附录 D · 命令速查</h2>
 <pre><code># 打包
-python build_exe.py                # onedir
-python build_exe.py --onefile      # 单文件
+python tools/build_exe.py                # onedir
+python tools/build_exe.py --onefile      # 单文件
 
 # 生成 HTML 文档
 python docs/build_html.py
 
 # 打包文档（输出到项目内 release/）
-python make_docs_package.py
+python tools/make_docs_package.py
 
 # 账号密码链路自检（不保存凭据）
-python login_check.py 13136072536 &lt;密码&gt;
+python tools/login_check.py 13136072536 &lt;密码&gt;
 
 # Token 寿命实验
-python tokenlab.py
+python tools/tokenlab.py
 
 # 校验 MD5
 Get-FileHash .\GaoGaoNetAUTO.exe -Algorithm MD5

@@ -11,6 +11,6 @@ PyInstaller==6.22.3
 # 测试依赖
 pytest==9.1.1
 
-# 抓取模式 capture.py 需要（可选，仅在需要分析网页流程时安装）：
+# 抓取模式 tools/capture.py 需要（可选，仅在需要分析网页流程时安装）：
 #   pip install playwright
 #   python -m playwright install chromium

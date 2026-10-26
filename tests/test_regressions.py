@@ -169,7 +169,7 @@ class TestBuildTooling:
 
     def test_release_zip_names_are_ascii(self):
         """交付包文件名必须是纯 ASCII —— 中文名上传 GitHub Release 会 404。"""
-        text = (ROOT / "make_release.py").read_text(encoding="utf-8")
+        text = (ROOT / "tools" / "make_release.py").read_text(encoding="utf-8")
         for suffix in ("portable.zip", "singlefile.zip", "source.zip"):
             assert suffix in text, suffix
         for legacy in ("免安装.zip", "单文件.zip", "源码绿色包.zip"):
@@ -181,7 +181,7 @@ class TestBuildTooling:
         v1.0.0 / v1.0.1 的两次 CI 都是挂在
         ``UnicodeEncodeError: 'charmap' codec can't encode`` 上。
         """
-        for name in ("build_exe.py", "make_release.py",
-                     "make_docs_package.py", "tools/audit_features.py"):
+        for name in ("tools/build_exe.py", "tools/make_release.py",
+                     "tools/make_docs_package.py", "tools/audit_features.py"):
             text = (ROOT / name).read_text(encoding="utf-8")
             assert 'reconfigure(encoding="utf-8"' in text, name

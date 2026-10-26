@@ -15,7 +15,8 @@ import argparse
 import sys
 from pathlib import Path
 
-HERE = Path(__file__).resolve().parent
+# 脚本在 tools/ 下，项目根要向上一层
+HERE = Path(__file__).resolve().parent.parent
 
 SETUP_BAT = r"""@echo off
 chcp 65001 >nul

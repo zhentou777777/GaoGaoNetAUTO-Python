@@ -231,7 +231,7 @@ tr:nth-child(even) td{background:rgba(255,255,255,.015)}
 <td><strong>R10</strong></td>
 <td>第二台电脑不能被杀毒软件拦截（下载 + 运行双拦）</td>
 <td><strong>已实现</strong></td>
-<td><code>build_exe.py</code> 默认 <strong>onedir</strong>（不再自解压到 <code>%TEMP%</code>）、<code>--noupx</code> 去壳、<code>--version-file</code> 版本资源；<code>tools/sign_release.ps1</code> 自签名（带时间戳）并导出 <code>.cer</code>；<code>docs/Defender-误报排查.md</code> 处置手册；<code>tools/audit_features.py</code> 产物特征自检（CI 内置，不通过拒绝发布）</td>
+<td><code>tools/build_exe.py</code> 默认 <strong>onedir</strong>（不再自解压到 <code>%TEMP%</code>）、<code>--noupx</code> 去壳、<code>--version-file</code> 版本资源；<code>tools/sign_release.ps1</code> 自签名（带时间戳）并导出 <code>.cer</code>；<code>docs/Defender-误报排查.md</code> 处置手册；<code>tools/audit_features.py</code> 产物特征自检（CI 内置，不通过拒绝发布）</td>
 </tr>
 <tr>
 <td><strong>R11</strong></td>
@@ -761,7 +761,7 @@ tr:nth-child(even) td{background:rgba(255,255,255,.015)}
 <tr>
 <td><strong>可诊断性</strong></td>
 <td>出问题能自证</td>
-<td>自愈状态条、在线设备摘要、实时日志、<code>login_check.py</code> / <code>tokenlab.py</code> 诊断脚本</td>
+<td>自愈状态条、在线设备摘要、实时日志、<code>tools/login_check.py</code> / <code>tools/tokenlab.py</code> 诊断脚本</td>
 </tr>
 </tbody></table>
 <hr>
@@ -1297,7 +1297,7 @@ tr:nth-child(even) td{background:rgba(255,255,255,.015)}
 <td>真实账号下 <code>POST /api/login</code> 成功响应中 <strong>Token 的确切字段名</strong>未实测确认</td>
 <td><code>_pick_token()</code> 已做多命名兼容 + JWT 兜底，但未跑通真实账号</td>
 <td>高</td>
-<td>用真实账号跑 <code>python login_check.py &lt;手机号&gt; &lt;密码&gt;</code> 确认</td>
+<td>用真实账号跑 <code>python tools/login_check.py &lt;手机号&gt; &lt;密码&gt;</code> 确认</td>
 </tr>
 <tr>
 <td>L2</td>
@@ -1413,7 +1413,7 @@ tr:nth-child(even) td{background:rgba(255,255,255,.015)}
 </tr>
 <tr>
 <td>R10 杀软兼容</td>
-<td><code>build_exe.py</code> <code>tools/</code> <code>docs/</code></td>
+<td><code>tools/build_exe.py</code> <code>tools/</code> <code>docs/</code></td>
 <td><code>--noupx</code> <code>--onedir</code> <code>sign_release.ps1</code></td>
 <td>A16</td>
 </tr>

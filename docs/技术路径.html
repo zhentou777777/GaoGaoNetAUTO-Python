@@ -677,8 +677,8 @@ blob    = &quot;v1:&quot; + base64(cipher + tag)</code></pre>
 <h3>为什么保留二维码兜底</h3>
 <p>账号密码路径（主）已经能完全免手机，但保留扫码有三个理由：</p>
 <ol><li>账号是学号而非手机号时，账号密码路径不可用</li><li>账号密码接口若被服务端改动，扫码是最后的兜底</li><li>它是<strong>唯一不依赖任何凭据</strong>的路径</li></ol>
-<h3>为什么需要 <code>capture.py</code></h3>
-<p>虽然当前已逆向清楚主要接口，但云高是商业产品，接口可能变。 <code>capture.py</code> 用 Playwright 记录全部 XHR/fetch/Authorization 头/Cookie， 是<strong>接口变更时的快速诊断工具</strong>，也是给后来者的逆向起点。</p>
+<h3>为什么需要 <code>tools/capture.py</code></h3>
+<p>虽然当前已逆向清楚主要接口，但云高是商业产品，接口可能变。 <code>tools/capture.py</code> 用 Playwright 记录全部 XHR/fetch/Authorization 头/Cookie， 是<strong>接口变更时的快速诊断工具</strong>，也是给后来者的逆向起点。</p>
 <hr>
 <h2 id="复现这份逆向">复现这份逆向</h2>
 <p>想自己验证或适配其他学校？</p>
@@ -690,11 +690,11 @@ print(r.text)   # 期望看到 code:410
 &quot;
 
 # 2. 登录接口探测（换你的域名）
-python login_check.py &lt;手机号&gt; &lt;密码&gt;
+python tools/login_check.py &lt;手机号&gt; &lt;密码&gt;
 
 # 3. 抓包分析（需要 Playwright）
 pip install playwright &amp;&amp; python -m playwright install chromium
-python capture.py</code></pre>
+python tools/capture.py</code></pre>
 <p><strong>适配其他学校通常只需改两处</strong>（设置界面里也能改）：</p>
 <ul><li>认证网关主机 / 端口</li><li><code>wlan_acname</code> / <code>paip</code> / <code>vlan</code> 接入点参数</li></ul>
 <p>其余逻辑（IP/MAC 探测、Token 自愈、重连退避）全部与学校无关。</p>

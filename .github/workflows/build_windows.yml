@@ -40,19 +40,19 @@ jobs:
         run: python -m pytest tests/ -v
 
       # ── 构建 ────────────────────────────────────────────────────
-      # build_exe.py 内部已把「产物特征审计失败」变成构建失败，
+      # tools/build_exe.py 内部已把「产物特征审计失败」变成构建失败，
       # 所以这里不再传 --skip-audit：审计不过就发不出去。
       - name: 打包免安装版（onedir，去 UPX，带版本资源）
-        run: python build_exe.py
+        run: python tools/build_exe.py
 
       # 单文件形态也走一次同样的审计门禁
       - name: 打包单文件版（onefile）
-        run: python build_exe.py --onefile
+        run: python tools/build_exe.py --onefile
 
       # ⚠️ 必须在两种形态都构建完成之后才出包。
       # 否则单文件包会打包到上一轮的旧 exe。
       - name: 生成交付包（三种形态）
-        run: python make_release.py --all --out dist/packages
+        run: python tools/make_release.py --all --out dist/packages
 
       - name: 生成 SHA-256 校验文件
         shell: pwsh

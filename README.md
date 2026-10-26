@@ -77,13 +77,13 @@ L0 走的是 `POST https://user.v4.yungao-tech.com/api/login`，返回码语义�
 想在命令行上先验证账号能不能登录（不保存任何东西）：
 
 ```bash
-python login_check.py        # 交互输入手机号与密码，密码不回显、不进 shell 历史
+python tools/login_check.py        # 交互输入手机号与密码，密码不回显、不进 shell 历史
 ```
 
 想知道自己学校到底轮不轮换 Token：
 
 ```bash
-python tokenlab.py
+python tools/tokenlab.py
 ```
 
 不填账号密码、坚持手动抓 Token 也可以：步骤见
@@ -106,9 +106,9 @@ python main.py          # 默认 Web 界面；加 --tk 走旧版 Tk 窗口
 **自己打包**
 
 ```bash
-python build_exe.py                     # onedir，产物 dist/GaoGaoNetAUTO/
-python build_exe.py --onefile           # 单文件
-python make_release.py --all            # 三种形态的 zip，输出到 release/
+python tools/build_exe.py                     # onedir，产物 dist/GaoGaoNetAUTO/
+python tools/build_exe.py --onefile           # 单文件
+python tools/make_release.py --all            # 三种形态的 zip，输出到 release/
 python -m pytest tests/ -q              # 测试（80 项）
 ```
 

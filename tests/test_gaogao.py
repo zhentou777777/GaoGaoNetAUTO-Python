@@ -585,7 +585,7 @@ class TestSensitiveDataRedaction:
     """抓包工具不得写出完整 Token（P1-7）。"""
 
     def test_auth_fingerprint_hides_credential(self):
-        import capture
+        import tools.capture as capture
 
         fp = capture._auth_fingerprint("Bearer eyJhbGciOiJIUzI1NiJ9abcdefgh")
         assert "eyJhbGciOiJIUzI1NiJ9abcdefgh" not in fp
@@ -593,7 +593,7 @@ class TestSensitiveDataRedaction:
         assert "len=" in fp
 
     def test_redact_masks_token_like_strings(self):
-        import capture
+        import tools.capture as capture
 
         body = '{"access_token":"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9QQ"}'
         out = capture._redact(body)
@@ -601,7 +601,7 @@ class TestSensitiveDataRedaction:
         assert "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9QQ" not in out
 
     def test_redact_keeps_ordinary_text(self):
-        import capture
+        import tools.capture as capture
 
         body = '{"code":200,"msg":"认证成功"}'
         assert capture._redact(body) == body
@@ -612,7 +612,7 @@ class TestLoginCheckNoCliPassword:
 
     def test_interactive_mode_by_default(self, monkeypatch):
         """不传参数时应走交互输入，而不是报错退出。"""
-        import login_check
+        import tools.login_check as login_check
 
         monkeypatch.setattr(login_check.sys, "argv", ["login_check.py"])
         monkeypatch.setattr(login_check, "_read_secret", lambda p: "secret-pwd")
@@ -639,7 +639,7 @@ class TestLoginCheckNoCliPassword:
 
     def test_token_output_is_masked(self):
         """Token 打印只给长度与首尾片段，不整段输出。"""
-        import login_check
+        import tools.login_check as login_check
 
         out = login_check._mask_token("abcdefghijklmnopqrstuvwxyz012345")
         assert "abcdefghijklmnopqrstuvwxyz012345" not in out

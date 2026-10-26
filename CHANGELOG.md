@@ -75,7 +75,16 @@
 - README 重写：补上缺失的标题与一句话简介，正文压缩到原来的一半，
   深度内容交给 `docs/`。
 - `.gitignore` 整理：补 `.pytest_cache/`、`config.json.bak`、`logs/`，去掉重复条目。
-- 版本号 1.0.1 → 1.0.2（`version_info.txt` / `make_release.py` / `make_docs_package.py` 三处同步）。
+- 版本号 1.0.1 → 1.0.2（`version_info.txt` / `tools/make_release.py` / `tools/make_docs_package.py` 三处同步）。
+
+### 仓库整理
+
+- **构建 / 调试脚本全部收进 `tools/`**：`build_exe.py` / `make_release.py` /
+  `make_docs_package.py` / `make_launchers.py` / `capture.py` / `tokenlab.py` /
+  `login_check.py`（原来散在根目录，根目录一度有 24 个 `.py`）。
+  根目录现在只剩**运行时模块**，`tools/README.md` 里有一张「这脚本是干嘛的」表。
+- 脚本移走后 `HERE` 改为指向项目根（`parent.parent`）；`build_exe.py` 额外把
+  项目根插进 `sys.path`，否则 `import icons` 会失败（图标静默不生成）。
 - `build_exe.py`：修掉两处 UTF-8 乱码，删掉与 `version_info.txt` 不同步的
   `VERSION` 常量（exe 属性里写的是旧版本号）。
 

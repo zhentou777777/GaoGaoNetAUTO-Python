@@ -166,9 +166,9 @@ tr:nth-child(even) td{background:rgba(255,255,255,.015)}
 </tbody></table>
 <p>L0 走的是 <code>POST https://user.v4.yungao-tech.com/api/login</code>，返回码语义（<code>400 参数不能为空</code> / <code>408 手机号不合法</code> / <code>401 账号不存在</code> / <code>401 密码错误</code>）已在 <code>acclogin.py</code> 里区分成人类可读的提示。</p>
 <p>想在命令行上先验证账号能不能登录（不保存任何东西）：</p>
-<pre><code>python login_check.py        # 交互输入手机号与密码，密码不回显、不进 shell 历史</code></pre>
+<pre><code>python tools/login_check.py        # 交互输入手机号与密码，密码不回显、不进 shell 历史</code></pre>
 <p>想知道自己学校到底轮不轮换 Token：</p>
-<pre><code>python tokenlab.py</code></pre>
+<pre><code>python tools/tokenlab.py</code></pre>
 <p>不填账号密码、坚持手动抓 Token 也可以：步骤见 <a href="docs/使用教程.md" target="_blank" rel="noopener">使用教程 · 备用方案：抓包取 Token</a>（浏览器 DevTools 这条路取不到， Token 只在糕糕 APP 的流量里）。</p>
 <hr>
 <h2 id="运行与构建">运行与构建</h2>
@@ -178,9 +178,9 @@ cd GaoGaoNetAUTO-Python
 pip install -r requirements.txt
 python main.py          # 默认 Web 界面；加 --tk 走旧版 Tk 窗口</code></pre>
 <p><strong>自己打包</strong></p>
-<pre><code>python build_exe.py                     # onedir，产物 dist/GaoGaoNetAUTO/
-python build_exe.py --onefile           # 单文件
-python make_release.py --all            # 三种形态的 zip，输出到 release/
+<pre><code>python tools/build_exe.py                     # onedir，产物 dist/GaoGaoNetAUTO/
+python tools/build_exe.py --onefile           # 单文件
+python tools/make_release.py --all            # 三种形态的 zip，输出到 release/
 python -m pytest tests/ -q              # 测试（80 项）</code></pre>
 <p>产物一律写到项目内的 <code>release/</code>，不会污染桌面。</p>
 <p><strong>CI</strong>：<code>.github/workflows/build_windows.yml</code> —— 推 <code>v*</code> tag 时自动跑测试 → 打包 → 产物特征审计 → 生成 SHA-256 → 发 Release。</p>

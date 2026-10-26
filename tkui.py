@@ -2048,7 +2048,7 @@ class App:
              width=110).pack()
 
     def _run_tokenlab(self):
-        script = Path(__file__).resolve().parent / "tokenlab.py"
+        script = Path(__file__).resolve().parent / "tools" / "tokenlab.py"
         if not script.exists():
             messagebox.showinfo("Token 寿命实验", "找不到 tokenlab.py")
             return
@@ -2057,7 +2057,7 @@ class App:
             messagebox.showinfo(
                 "Token 寿命实验",
                 "打包版里没有独立的 tokenlab.py。\n\n"
-                "请在源码目录用命令行运行：python tokenlab.py",
+                "请在源码目录用命令行运行：python tools/tokenlab.py",
             )
             return
         # 延迟导入：subprocess 只在开发调试工具里用得上，

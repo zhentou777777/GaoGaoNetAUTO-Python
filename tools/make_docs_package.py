@@ -30,7 +30,8 @@ try:
 except Exception:
     pass
 
-HERE = Path(__file__).resolve().parent
+# 脚本在 tools/ 下，项目根要向上一层
+HERE = Path(__file__).resolve().parent.parent
 VERSION = "1.0.2"
 PKG_NAME = f"GaoGaoNetAUTO-文档包-v{VERSION}"
 # 落盘的文件名用英文（中文名上传 GitHub Release 会 404）；

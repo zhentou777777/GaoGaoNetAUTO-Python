@@ -44,7 +44,14 @@ try:
 except Exception:
     pass
 
-HERE = Path(__file__).resolve().parent
+# 脚本在 tools/ 下，项目根要向上一层
+HERE = Path(__file__).resolve().parent.parent
+
+# 从 tools/ 里跑时，``import icons`` 这类根目录模块会找不到 ——
+# 把项目根加进 sys.path（以前脚本就在根目录，不需要这行）。
+if str(HERE) not in sys.path:
+    sys.path.insert(0, str(HERE))
+
 NAME = "GaoGaoNetAUTO"
 # 版本号的唯一来源是 version_info.txt（--version-file 直接用它），
 # 这里不再另存一份常量 —— 之前两份不同步，exe 属性里写的是旧版本。

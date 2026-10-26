@@ -225,9 +225,9 @@ Content-Type: application/json
 <blockquote><p>想抹掉本机保存的凭据：设置区底部点 <strong>「清除已保存凭据」</strong>（会二次确认），</p><p>Token / 上一版 Token / 手机号 / 密码会一并抹掉，备份文件也覆写删除。</p></blockquote>
 <h3>不想在程序里填？先单独测一下</h3>
 <p>怕填错、或想知道云高是否认你的账号，可以先在命令行测（<strong>不会保存任何东西</strong>）：</p>
-<pre><code>python login_check.py</code></pre>
+<pre><code>python tools/login_check.py</code></pre>
 <p>它会<strong>交互式</strong>问你要手机号和密码（密码不回显、不进 shell 历史），然后打印服务端原始应答和错误分类。</p>
-<blockquote><p>也可以只把手机号写在命令行：<code>python login_check.py 13800138000</code> —— 密码仍然走交互输入。</p><p><strong>不建议</strong>把密码也写进命令行：同机其他账号通过进程列表就能看到。</p></blockquote>
+<blockquote><p>也可以只把手机号写在命令行：<code>python tools/login_check.py 13800138000</code> —— 密码仍然走交互输入。</p><p><strong>不建议</strong>把密码也写进命令行：同机其他账号通过进程列表就能看到。</p></blockquote>
 <h3>各种错误的含义</h3>
 <table><thead><tr>
 <th>程序提示</th>
@@ -544,20 +544,20 @@ logout?ip=&lt;手机IP&gt; → auth?ip=      自动顶替手机（需先填手�
 <h2 id="进阶玩法">进阶玩法</h2>
 <h3>Token 寿命实验</h3>
 <p>想知道「你这所学校到底轮不换 Token」？在<strong>源码目录</strong>运行：</p>
-<pre><code>python tokenlab.py</code></pre>
+<pre><code>python tools/tokenlab.py</code></pre>
 <p>它会：Token 认证一次 → 让你在手机上做一次设备登录 → 再用同一 Token 认证 → 直接给出「轮换 / 不轮换」的结论。</p>
-<blockquote><p>打包版里没有独立的 <code>tokenlab.py</code>，需要在源码目录用命令行跑。</p><p>主窗口设置区也有一个「Token 寿命实验」按钮会帮你调起它。</p></blockquote>
+<blockquote><p>打包版里没有独立的 <code>tools/tokenlab.py</code>，需要在源码目录用命令行跑。</p><p>主窗口设置区也有一个「Token 寿命实验」按钮会帮你调起它。</p></blockquote>
 <h3>抓取模式（分析用）</h3>
 <p>想研究网页扫码流程的真实请求：</p>
 <pre><code>pip install playwright
 python -m playwright install chromium
-python capture.py</code></pre>
+python tools/capture.py</code></pre>
 <p>会输出 <code>capture.json</code>（完整请求记录）和 <code>capture.log</code>（人读摘要）。</p>
 <blockquote><p><strong>结论预告</strong>：实测已确认<strong>页面里根本没有状态轮询接口</strong>，</p><p>手机确认后服务端直接改写「该 session 对应 IP」的上线状态。</p><p>所以本工具判定「授权完成」的信号是<strong>本机是否已连通外网</strong>。</p></blockquote>
 <h3>从源码运行 / 自己打包</h3>
 <pre><code>pip install -r requirements.txt
 python main.py          # 直接跑
-python build_exe.py     # 打包成 exe</code></pre>
+python tools/build_exe.py     # 打包成 exe</code></pre>
 <hr>
 <h2 id="附-配置文件说明">附：配置文件说明</h2>
 <p><code>config.json</code> 生成在 <strong><code>%LOCALAPPDATA%\GaoGaoNetAUTO\</code></strong>（与 exe 位置无关），长这样：</p>

@@ -38,7 +38,8 @@ try:
 except Exception:
     pass
 
-HERE = Path(__file__).resolve().parent
+# 脚本在 tools/ 下，项目根要向上一层
+HERE = Path(__file__).resolve().parent.parent
 NAME = "GaoGaoNetAUTO"
 VERSION = "1.0.2"
 
@@ -51,8 +52,7 @@ SOURCE_FILES = [
     "auth.py", "config.py", "vault.py", "logs.py", "icons.py",
     "netguard.py", "netprobe_win.py", "qrflow.py", "acclogin.py", "taskbar.py",
     "requirements.txt", "README.md", "CHANGELOG.md", "LICENSE",
-    "build_exe.py", "version_info.txt",
-    "make_launchers.py", "make_release.py",
+    "version_info.txt",
 ]
 SOURCE_DIRS = ["assets", "docs", "tools", "webui"]
 
@@ -138,7 +138,7 @@ def build_source_zip(out_dir: Path) -> Path | None:
                             ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
     # 便捷脚本
     try:
-        subprocess.run([sys.executable, str(HERE / "make_launchers.py"),
+        subprocess.run([sys.executable, str(HERE / "tools" / "make_launchers.py"),
                         "--out", str(stage)], check=False)
     except Exception:
         pass
