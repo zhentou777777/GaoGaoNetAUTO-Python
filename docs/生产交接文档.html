@@ -214,7 +214,7 @@ tr:nth-child(even) td{background:rgba(255,255,255,.015)}
 </tr>
 <tr>
 <td>2</td>
-<td>打包脚本 <code>build_exe.py</code> + CI 定义 <code>ci/build_windows.yml</code></td>
+<td>打包脚本 <code>build_exe.py</code> + CI 定义 <code>.github/workflows/build_windows.yml</code></td>
 <td>✅ 已交付</td>
 <td>☐</td>
 </tr>
@@ -932,19 +932,18 @@ py -3 -m venv .venv
 </tr>
 </tbody></table>
 <h3>3.3 CI 自动构建</h3>
-<p><code>ci/build_windows.yml</code>（部署到 <code>.github/workflows/build_windows.yml</code>）：</p>
+<p>唯一一份定义在 <code>.github/workflows/build_windows.yml</code>：</p>
 <pre><code>触发：workflow_dispatch 手动  |  push tag v*
 环境：windows-latest, Python 3.11
-步骤：checkout → setup-python → pip install -r requirements.txt pyinstaller
-     → python build_exe.py --skip-audit
-     → python tools/audit_features.py dist/GaoGaoNetAUTO
-        （退出码非 0 → Write-Error，拒绝发布）
+步骤：checkout → setup-python → pip install -r requirements.txt
+     → python -m pytest tests/
+     → python build_exe.py            （内部含产物特征审计，审计失败即构建失败）
+     → python build_exe.py --onefile
      → python make_release.py --all --out dist/packages
-     → upload-artifact
+     → 生成 SHA256SUMS.txt → upload-artifact
      → （仅 tag）softprops/action-gh-release 发布 Release</code></pre>
 <p><strong>审计门禁</strong>：产物若命中 UPX / onefile 自解压 / 注册表自启动 / 注入类 API， CI 会直接失败，不会把误报版本发到用户手里。</p>
-<p>一键部署 CI：</p>
-<pre><code>python ci/install_workflow.py</code></pre>
+<blockquote><p>早期曾用 <code>ci/install_workflow.py</code> 把同一份 yml 复制到 <code>.github/workflows/</code>。</p><p>那份副本与正式定义内容完全重复，已经删除 —— 改 CI 只改 <code>.github/workflows/</code> 这一份。</p></blockquote>
 <h3>3.4 签名与发布流程（自签名）</h3>
 <blockquote><p>目的：消除「未知发布者」外观，并让签名长期有效。</p><p><strong>前提</strong>：自签名<strong>不能</strong>让 SmartScreen 直接放行（见 1.9）。</p><p><strong>已实测</strong>：v1.0.0 的两个 exe 形态签名状态均为 <code>Valid</code>。</p></blockquote>
 <h4>一条命令搞定</h4>

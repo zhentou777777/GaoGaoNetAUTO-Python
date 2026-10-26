@@ -7,8 +7,8 @@
     python make_docs_package.py
 
 产物：
-    dist/文档包/GaoGaoNetAUTO-文档包-v1.0.0/     （中间目录）
-    release/GaoGaoNetAUTO-文档包-v1.0.0.zip      （最终交付）
+    dist/文档包/GaoGaoNetAUTO-文档包-v<VERSION>/     （中间目录）
+    release/GaoGaoNetAUTO-文档包-v<VERSION>.zip      （最终交付）
 
 **不写桌面** —— 桌面是用户的私人空间，构建产物一律留在项目内。
 """
@@ -87,7 +87,7 @@ INDEX_MD = """# 糕糕校园网自动认证 · 文档包
 | `04-项目说明.md` / `.html` | 项目总览、原理速览、快速开始、FAQ |
 | `05-构建与发布说明.md` | 打包命令与参数、签名流程、CI 配置、发布清单 |
 | `06-Defender误报排查.md` / `.html` | 被杀毒软件拦截的成因、处置步骤、证书信任、彻底根治方案 |
-| `07-CHANGELOG.md` | 版本变更记录（v1.0.0 的安全 / 可靠性 / 工程化改动明细） |
+| `07-CHANGELOG.md` | 版本变更记录（安全 / 可靠性 / 工程化改动明细） |
 | `LICENSE` | GPL-2.0 |
 | `MANIFEST.txt` | 本包所有文件的路径、字节数、MD5 |
 
@@ -238,20 +238,17 @@ Import-Certificate -FilePath .\\GaoGaoNetAUTO.cer -CertStoreLocation Cert:\\Loca
 
 ## 五、CI 自动构建
 
-配置源：`ci/build_windows.yml`，部署到 `.github/workflows/build_windows.yml`。
+配置源（唯一一份）：`.github/workflows/build_windows.yml`。
 
 ```
 触发：workflow_dispatch（手动） | push tag v*
 环境：windows-latest, Python 3.11
-步骤：checkout → setup-python → pip install -r requirements.txt pyinstaller
-     → python build_exe.py → upload-artifact
+步骤：checkout → setup-python → pip install -r requirements.txt
+     → python -m pytest tests/
+     → python build_exe.py（含产物特征审计）→ python build_exe.py --onefile
+     → python make_release.py --all --out dist/packages
+     → 生成 SHA256SUMS.txt → upload-artifact
      → （仅 tag）softprops/action-gh-release 发布 Release
-```
-
-一键部署：
-
-```powershell
-python ci/install_workflow.py
 ```
 
 > **CI 产物的坑**：GitHub Actions 生成的 exe 无签名、下载量低 → SmartScreen 信誉仍差。Release 说明里必须写明「首次运行需『更多信息 → 仍要运行』」。

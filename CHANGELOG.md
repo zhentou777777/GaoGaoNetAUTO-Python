@@ -6,6 +6,52 @@
 
 ---
 
+## [未发布] — 2026-10-26
+
+### 修复
+
+- **「手机 IP」设置每 15 秒被清空**：`info_snapshot()` 不返回 `phone_ip`，
+  前端回填的是个不存在的 `dataset.v`，输入框被清成空串；用户随后点「保存设置」
+  就把这项配置**写成了空值**。现在快照带上 `phone_ip` / `scheme`，并真正落盘。
+- **「抢占上线」在没有其他设备在线时静默失效**：`_takeover_bg_inner` 调
+  `self.login()`，而忙碌锁已被 `takeover()` 持有，于是只打一行
+  「已有认证在进行中」就结束。改为直接跑认证主体。
+- **退出程序可能卡住**：`ThreadingHTTPServer` 默认在 `server_close()` 里 join
+  所有处理线程，SSE 长连接和浏览器挂着的 keep-alive 会拖住退出数秒。
+  改为 `block_on_close = False`，并让 handler 不再往 stderr 写访问/错误日志。
+- **首屏令牌读不出来**：种的是 `HttpOnly` cookie，`document.cookie` 取不到，
+  `X-Auth-Token` 始终是空串（请求全靠 cookie 兜住）。改为优先读地址栏 `?t=`。
+- **SSE 重连后状态栏一直停在「连接中断」**：没有处理服务端建连时下发的
+  `kind: "state"` 事件，也没有 `onopen` 复位。
+- **断网判定会累积**：在线时没清零失败计数，抖动两次就被当成断网。
+- **`generate_204` 探针永远失败**：实际返回 204，代码却按 200 判定。
+- **重连循环停不下来**：`stop_reconnect()` 只改标志位，线程仍在跑并重复认证；
+  线程自己退出时又不复位标志，导致之后的 `start_reconnect()` 永久失效。
+- **账号密码登录的错误归类**：「该手机号不存在」先命中「手机号」，
+  被误报成「手机号格式不正确」。
+- `save_settings()` 校验了 `scheme` 却从不保存它。
+
+### 测试
+
+- pytest 75 → **80 项**。
+- **测试会清掉用户真实凭据**（高危）：`TestCoreController` 直接 `Config()`，
+  读写的是 `%LOCALAPPDATA%` 里的**真实配置**，其中 `test_account_masked` 收尾调
+  `clear_credentials()` —— 在开发机上跑一次测试，用户保存的 Token / 手机号 / 密码
+  就没了。新增 `tests/conftest.py`，把所有测试的数据目录锁定到临时目录。
+- 修复项回归测试集中放在 `tests/test_regressions.py`。
+
+### 仓库
+
+- 删除 `ci/` 目录：`ci/build_windows.yml` 与 `.github/workflows/build_windows.yml`
+  内容**完全重复**，`ci/install_workflow.py` 只是一次性推送脚本。
+- README 重写：补上缺失的标题与一句话简介，正文压缩到原来的一半，
+  深度内容交给 `docs/`。
+- `.gitignore` 整理：补 `.pytest_cache/`、`config.json.bak`、`logs/`，去掉重复条目。
+- `build_exe.py`：修掉两处 UTF-8 乱码，删掉与 `version_info.txt` 不同步的
+  `VERSION` 常量（exe 属性里写的是旧版本号）。
+
+---
+
 ## [1.0.1] — 2026-10-25
 
 ### 界面改版
