@@ -148,9 +148,11 @@ class Controller:
             "gateway": self.cfg.base_url,
             "host": host,
             "port": port,
+            "scheme": str(self.cfg.get("scheme", "") or ""),
             "ip": ip,
             "mac": self._cached_mac,
             "slot_ip": self.cfg.get("last_ip") or ip,
+            "phone_ip": str(self.cfg.get("phone_ip", "") or ""),
             "devices_brief": self._cached_devices,
             "has_token": self.cfg.has_token(),
             "has_account": self.cfg.has_account(),
@@ -195,14 +197,25 @@ class Controller:
             return f"{len(devices)} 台在线（其他：{', '.join(others)}）"
         return f"{len(devices)} 台在线"
 
+    def _query_devices(self, token: str) -> list:
+        """查在线设备；任何异常都当成「查不到」返回空列表。
+
+        抢占/在线列表这类路径**不能**因为一次网络抖动就抛出去 ——
+        调用方拿空列表还能继续走降级流程。
+        """
+        if not token:
+            return []
+        try:
+            return self.auth.online_devices(token) or []
+        except Exception as exc:
+            self.log(f"查询在线设备失败: {exc}")
+            return []
+
     def other_devices(self, my_ip: str = "") -> list:
         """列出占用名额的其他设备 IP。"""
         if not my_ip:
             my_ip = self.auth.detect_local_ip()
-        try:
-            devices = self.auth.online_devices(self.cfg.get_token())
-        except Exception:
-            return []
+        devices = self._query_devices(self.cfg.get_token())
         return [str(d.get("ip", "")) for d in devices
                 if str(d.get("ip", "")) and str(d.get("ip", "")) != my_ip]
 
@@ -228,6 +241,7 @@ class Controller:
         self.cfg.set("phone_ip", str(data.get("phone_ip", "") or "").strip())
         self.cfg.set("host", host)
         self.cfg.set("port", port)
+        self.cfg.set("scheme", scheme)
         self.cfg.set("auto_kick_phone", bool(data.get("auto_kick_phone")))
         self.cfg.set("autostart", bool(data.get("autostart")))
         return True, "设置已保存"
@@ -516,10 +530,7 @@ class Controller:
         if not token:
             return {"ok": False, "message": "没有 Token，无法抢占——请先扫码登录或填账号密码"}
         my_ip = self.auth.detect_local_ip()
-        try:
-            devices = self.auth.online_devices(token)
-        except Exception:
-            devices = []
+        devices = self._query_devices(token)
         others = [str(d.get("ip", "")) for d in devices
                   if str(d.get("ip", "")) and str(d.get("ip", "")) != my_ip]
         return {"ok": True, "others": others, "my_ip": my_ip}
@@ -553,29 +564,16 @@ class Controller:
             self.set_status(STATE_ERROR, "未连接校园网", "请先联网再抢占")
             return
 
-        devices = self.auth.online_devices(token)
-        if not devices:
-            mobile, pwd = self.cfg.get_account()
-            if mobile and pwd:
-                new_token = self._auto_login_account()
-                if new_token:
-                    token = new_token
-                    self.log("★ 继续抢占")
-
-        try:
-            devices = self.auth.online_devices(token)
-        except Exception as exc:
-            self.log(f"查询在线设备失败: {exc}")
-            self.set_status(STATE_ERROR, "查询失败")
-            return
-
+        devices = self._query_devices(token)
         if not devices:
             if not token:
-                self.log("没有 Token，无法查询在线设备——请先扫码登录")
-                self.set_status(STATE_ERROR, "缺少 Token", "请先扫码登录")
-                return
-            self.log("当前没有其他设备在线，直接认证")
-            self.login(takeover=True)
+                self.log("没有 Token，且当前没有其他设备在线——改走正常认证流程")
+            else:
+                self.log("当前没有其他设备在线，直接认证")
+            # ⚠️ 不能调 self.login() —— 那会再抢一次忙碌锁，而忙碌锁此刻
+            # 已经被 takeover() 持有，于是「已有认证在进行中，请稍候」，
+            # 抢占按钮变成静默无效。这里直接跑认证主体（同一后台线程）。
+            self._login_bg_inner(takeover=True)
             return
 
         others = [str(d.get("ip", "")) for d in devices

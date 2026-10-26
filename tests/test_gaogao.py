@@ -943,8 +943,33 @@ class TestCoreController:
 
         c = core.Controller()
         info = c.info_snapshot()
-        for key in ("gateway", "ip", "mac", "has_token", "autostart"):
+        for key in ("gateway", "ip", "mac", "has_token", "autostart",
+                    "phone_ip", "scheme"):
             assert key in info, key
+
+    def test_settings_roundtrip_phone_ip_and_scheme(self, tmp_path, monkeypatch):
+        """设置里的「手机 IP」必须能回读。
+
+        曾经的 bug：``info_snapshot()`` 不返回 ``phone_ip``，
+        前端每 15 秒刷新一次就把输入框清空，用户再点「保存设置」
+        就把这项配置**写成了空值**。
+        """
+        import config
+        import core
+
+        monkeypatch.setenv("GAOGAO_DATA_DIR", str(tmp_path))
+        c = core.Controller(cfg=config.Config(path=tmp_path / "config.json"))
+        ok, _ = c.save_settings({
+            "host": "hgs.auth.yungao-tech.com", "port": 1110,
+            "scheme": "http", "phone_ip": "10.135.1.9",
+        })
+        assert ok
+        info = c.info_snapshot()
+        assert info["phone_ip"] == "10.135.1.9"
+        assert info["scheme"] == "http"
+        # 落盘也要在（不是只在内存里）
+        assert config.Config(path=tmp_path / "config.json").get("phone_ip") == "10.135.1.9"
+
 
     def test_account_masked(self):
         """手机号只以掩码形式暴露。"""

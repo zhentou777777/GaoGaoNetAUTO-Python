@@ -13,31 +13,23 @@ import time
 from dataclasses import dataclass
 from typing import Callable, List, Optional, Tuple
 
-# 探测目标：(host, port)——任一连通即认为外网可达
-_PROBE_TARGETS: List[Tuple[str, int]] = [
-    ("223.5.5.5", 53),
-    ("119.29.29.29", 53),
-    ("1.1.1.1", 443),
-    ("114.114.114.114", 80),
-]
-
-STATE_ONLINE = "online"
-STATE_OFFLINE = "offline"
-STATE_UNKNOWN = "unknown"
-
-# 连通性探测目标：HTTPS + **带预期内容**。
+# 连通性探测目标：(url, 期望状态码, 响应体特征串)。
 #
 # 为什么不能只做 TCP connect：很多环境（校园网未认证时的「重定向门户」、
 # 企业代理、防火墙的 SYN-ACK 响应）会让 TCP 握手成功，但**根本没有真的上网**。
 # 只看 TCP 会把「连上了但拿不到任何内容」误判成已联网，
 # 于是程序以为网络正常，**永远不去触发重新认证**。
 #
-# 现在要求：拿回 200 状态码，且响应体里出现预期特征串。
-_PROBE_TARGETS = [
-    ("https://connectivitycheck.gstatic.com/generate_204", "204"),
-    ("https://www.msftconnecttest.com/connecttest.txt", "Microsoft Connect Test"),
-    ("https://captive.apple.com/hotspot-detect.html", "Success"),
+# 现在要求：状态码符合预期，且（给了特征串时）响应体里出现该特征串。
+_PROBE_TARGETS: List[Tuple[str, int, str]] = [
+    # 204 是「空响应」，只能靠状态码判定
+    ("https://connectivitycheck.gstatic.com/generate_204", 204, ""),
+    ("https://www.msftconnecttest.com/connecttest.txt", 200, "Microsoft Connect Test"),
+    ("https://captive.apple.com/hotspot-detect.html", 200, "Success"),
 ]
+
+# 没有 requests 时的 TCP 兜底目标
+_TCP_PROBES: List[Tuple[str, int]] = [("223.5.5.5", 53), ("1.1.1.1", 443)]
 
 
 @dataclass
@@ -50,7 +42,7 @@ class GuardEvent:
 def probe_online(timeout: float = 3.0) -> bool:
     """探测外网连通性。
 
-    判据是**拿到预期的响应内容**，而不是「TCP 握手成功」。
+    判据是**状态码 + 响应内容**，而不是「TCP 握手成功」。
     原因见 :data:`_PROBE_TARGETS` 的注释：未认证的校园网会接受 TCP
     连接但把 HTTP 请求重定向到登录门户，只看握手会把「没网」误判成「有网」，
     程序就永远不去重认证。
@@ -64,25 +56,23 @@ def probe_online(timeout: float = 3.0) -> bool:
         requests = None  # type: ignore
 
     if requests is not None:
-        for url, expect in _PROBE_TARGETS:
+        for url, want_status, expect in _PROBE_TARGETS:
             try:
                 resp = requests.get(url, timeout=timeout,
                                     allow_redirects=False,
                                     headers={"User-Agent": "Mozilla/5.0"})
-                # 302/301 说明被门户劫持 → 不算联网
-                if resp.status_code in (301, 302, 303, 307, 308):
+                # 3xx 说明被门户劫持 → 不算联网
+                if resp.status_code != want_status:
                     continue
-                if resp.status_code != 200:
+                if expect and expect.lower() not in (resp.text or "").lower():
                     continue
-                body = resp.text or ""
-                if expect.lower() in body.lower():
-                    return True
+                return True
             except Exception:
                 continue
         return False
 
     # 没有 requests 时退回 TCP 探测（弱一些，但总比不探测强）
-    for host, port in (("223.5.5.5", 53), ("1.1.1.1", 443)):
+    for host, port in _TCP_PROBES:
         try:
             with socket.create_connection((host, port), timeout=timeout):
                 return True
@@ -142,8 +132,14 @@ class NetGuard:
         self._reconnect_thread.start()
 
     def stop_reconnect(self) -> None:
+        """停止重连循环（网络恢复 / 用户手动认证成功后调用）。"""
         with self._lock:
             self._reconnecting = False
+
+    @property
+    def reconnecting(self) -> bool:
+        with self._lock:
+            return self._reconnecting
 
     # ------------------------------------------------------------ 主循环
 
@@ -186,7 +182,11 @@ class NetGuard:
             self._fail_streak = 0
             self.log("网络已连通")
             self.on_event(GuardEvent("online", "网络恢复", ip))
-        elif not online:
+        elif online:
+            # 在线时把失败计数清零，否则「抖动一次 → 恢复 → 再抖动」
+            # 会让计数累积，第二次抖动就被当成断网。
+            self._fail_streak = 0
+        else:
             self._fail_streak += 1
             # 连续 2 次判定为断网才上报，避免瞬时抖动误触发
             if self._fail_streak >= 2 and was_online:
@@ -207,21 +207,32 @@ class NetGuard:
         因此重连流程**只做非抢占式认证**；要抢占请用户手动点按钮。
         """
         attempt = 0
-        while not self._stop.is_set():
-            # 等网络先恢复一点，再试
-            self._stop.wait(self.retry_base)
+        try:
+            # 循环条件必须看 `_reconnecting`：网络被别的方式修好时
+            # 上层会调 stop_reconnect()，这里要能立刻停下来，
+            # 否则会在「已经在线」的情况下继续每 15 秒重认证一次。
+            while self.reconnecting and not self._stop.is_set():
+                # 等网络先恢复一点，再试
+                self._stop.wait(self.retry_base)
 
-            if probe_online():
-                self.log("网络已恢复，结束重连循环")
-                return
+                if not self.reconnecting or self._stop.is_set():
+                    break
+                if probe_online():
+                    self.log("网络已恢复，结束重连循环")
+                    return
 
-            attempt += 1
-            delay = min(self.retry_base * (2 ** (attempt - 1)), self.retry_max)
-            self.log(f"第 {attempt} 次重连尝试（{self.retry_base}s 间隔）")
-            try:
-                self.on_event(GuardEvent("reconnect", f"第 {attempt} 次重连尝试", ""))
-            except Exception as exc:
-                self.log(f"重连回调异常: {exc}")
+                attempt += 1
+                delay = min(self.retry_base * (2 ** (attempt - 1)), self.retry_max)
+                self.log(f"第 {attempt} 次重连尝试（{delay}s 后重试）")
+                try:
+                    self.on_event(GuardEvent("reconnect", f"第 {attempt} 次重连尝试", ""))
+                except Exception as exc:
+                    self.log(f"重连回调异常: {exc}")
 
-            # 退避等待，同时随时可被停止
-            self._stop.wait(min(delay, self.retry_max))
+                # 退避等待，同时随时可被停止
+                self._stop.wait(min(delay, self.retry_max))
+        finally:
+            # 线程自己退出时也要复位，否则 start_reconnect() 会因为
+            # 「已经在重连」而永远不再启动新的重连循环。
+            with self._lock:
+                self._reconnecting = False

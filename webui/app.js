@@ -31,7 +31,12 @@ async function api(path, body) {
   return data;
 }
 
+// 令牌：cookie 是 HttpOnly（JS 读不到），所以真正的来源是地址栏的 ?t=。
+// 之前只读 cookie，导致 X-Auth-Token 永远是空串——请求全靠 cookie 兜住，
+// 一旦浏览器跳过 cookie 就整页 401。
 function token() {
+  const t = new URLSearchParams(location.search).get('t');
+  if (t) return t;
   const m = document.cookie.match(/(?:^|;\s*)gg_token=([^;]+)/);
   return m ? decodeURIComponent(m[1]) : '';
 }
@@ -123,7 +128,7 @@ function renderInfo(info) {
   if (!focusInField('inPort')) {
     $('#inPort').value = info.port || '1110';
   }
-  if (!focusInField('inPhone'))  $('#inPhone').value = $('#inPhone').dataset.v || '';
+  if (!focusInField('inPhone'))  $('#inPhone').value = info.phone_ip || '';
   // 手机号只回填掩码形式，不回显明文
   if (!focusInField('inMobile')) {
     $('#inMobile').placeholder = info.account_masked
@@ -393,6 +398,10 @@ function connectSSE() {
       case 'log':
         addLog(e.text);
         break;
+      case 'state':
+        // 服务端建连时会先推一次完整快照
+        renderInfo(e.state);
+        break;
       case 'status':
         renderStatus(e.state, e.text, e.badge);
         break;
@@ -423,6 +432,11 @@ function connectSSE() {
           (/有效/.test(e.text) ? ' ok' : (/失效/.test(e.text) ? ' err' : ''));
         break;
     }
+  };
+  es.onopen = () => {
+    // 重连成功后把「连接中断」的提示还原成真实状态
+    if (state.state) renderStatus(state.state);
+    refreshState();
   };
   es.onerror = () => {
     // 断线重连（EventSource 自带重连，这里只更新提示）

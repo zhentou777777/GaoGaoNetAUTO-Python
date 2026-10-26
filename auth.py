@@ -536,8 +536,8 @@ class CampusAuth:
             # JWT 形态（三段式）——最可信
             if cand.count(".") == 2 and all(c.isalnum() or c in "-_." for c in cand):
                 return cand
-            # 明确字段名来源的（candidates 前半段来自 header / 命名字段）
-            if cand in candidates[:len(candidates)] and _looks_like_token(cand):
+            # 其余候选必须本身看起来就像 Token（够长、字符集合理、有熵）
+            if _looks_like_token(cand):
                 return cand
         return None
 

@@ -268,6 +268,11 @@ class _QuietServer(ThreadingHTTPServer):
 
     daemon_threads = True
     allow_reuse_address = True
+    # 关服务时**不等**残留的处理线程。
+    # 默认值 True 会让 server_close() 去 join 所有 handler 线程 ——
+    # 而 SSE 长连接线程、被浏览器挂着的 keep-alive 连接都要等好几秒，
+    # 表现为「点退出后程序卡住不关」。
+    block_on_close = False
 
     def handle_error(self, request, client_address):
         exc = sys.exc_info()[1]
@@ -311,6 +316,14 @@ def _make_handler(app: WebApp):
             """不往 stderr 刷访问日志（会污染控制台和日志文件）。"""
             return
 
+        def log_error(self, fmt, *args):
+            """同样不往 stderr 写 —— 标准库在这里会直接 write(2)。
+
+            残留连接、半截请求都会触发 log_error；写 stderr 在多线程下
+            还会和日志重定向/测试捕获抢锁，进而把退出流程卡住。
+            """
+            return
+
         def _authorized(self) -> bool:
             """校验 token。
 
@@ -344,11 +357,19 @@ def _make_handler(app: WebApp):
             self._json({"ok": False, "message": msg}, status)
 
         def _read_json(self) -> dict:
+            """读请求体（上限 1 MB）。
+
+            ⚠️ 调用点必须在鉴权**之前**：如果先判 401 再读 body，
+            请求体留在 socket 里，keep-alive 连接上的下一个请求会被
+            这些残留字节污染（表现为莫名其妙的 400）。
+            """
             try:
                 n = int(self.headers.get("Content-Length", "0") or 0)
             except ValueError:
                 return {}
             if n <= 0:
+                return {}
+            if n > 1024 * 1024:
                 return {}
             try:
                 raw = self.rfile.read(n)
@@ -461,11 +482,13 @@ def _make_handler(app: WebApp):
             parsed = urlparse(self.path)
             path = parsed.path
 
+            # 先读完请求体再鉴权 —— 见 _read_json 的说明
+            data = self._read_json()
+
             if not self._authorized():
                 self._error("未授权", 401)
                 return
 
-            data = self._read_json()
             c = app.controller
 
             if path == "/api/login":

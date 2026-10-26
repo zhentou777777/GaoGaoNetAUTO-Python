@@ -4,7 +4,7 @@
 默认产出 **onedir**（目录形态）而非 onefile，理由：
 
 * onefile 启动时把整个包解压到 ``%TEMP%\\._MEIxxxx``，
-  这既是杀软���「自解压到临时目录」行为规则的高危命中点，
+  这既是杀软对「自解压到临时目录」行为规则的高危命中点，
   也让 Defender 的行为分析看到「一个进程写了大量文件」。
 * onedir 不会在临时目录落盘，行为特征明显更干净。
 * onedir 启动快（不用每次解压几百 MB）。
@@ -36,7 +36,8 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 NAME = "GaoGaoNetAUTO"
-VERSION = "1.0.0.0"
+# 版本号的唯一来源是 version_info.txt（--version-file 直接用它），
+# 这里不再另存一份常量 —— 之前两份不同步，exe 属性里写的是旧版本。
 
 # 开发调试专用、不该进生产包的模块
 EXCLUDED_MODULES = [
@@ -54,7 +55,7 @@ EXCLUDED_MODULES = [
 
 
 def _check_runtime() -> bool:
-    """打包前的环境自检 —— 尤其�� tkinter。
+    """打包前的环境自检 —— 尤其看 tkinter。
 
     **tkinter 缺失是最容易踩的坑**：有些 Python 发行版（精简版、
     conda 的 base 环境、CI 容器）不带 tkinter，而本项目是纯 GUI 程序。

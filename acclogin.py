@@ -106,19 +106,25 @@ def _pick_token(payload: Any) -> str:
 
 
 def _classify(payload: Dict[str, Any]) -> str:
+    """把登录失败应答归类。
+
+    ⚠️ 判定顺序有讲究：「账号不存在」的文案里同时含「手机号」，
+    先判「手机号」会把 ERR_NO_ACCOUNT 误报成「手机号格式不正确」，
+    用户会以为号码写错了而不是账号没注册。
+    """
     msg = str(payload.get("msg", ""))
-    if "参数" in msg or "不能为空" in msg:
-        return ERR_BAD_PARAMS
-    if "手机号" in msg or "号码" in msg:
-        return ERR_BAD_MOBILE
-    if "密码" in msg:
-        return ERR_BAD_PASSWORD
-    if "不存在" in msg or "未注册" in msg:
-        return ERR_NO_ACCOUNT
     if "验证码" in msg or "captcha" in msg.lower():
         return ERR_NEED_CAPTCHA
     if "短信" in msg or "sms" in msg.lower():
         return ERR_NEED_SMS
+    if "不存在" in msg or "未注册" in msg:
+        return ERR_NO_ACCOUNT
+    if "密码" in msg:
+        return ERR_BAD_PASSWORD
+    if "参数" in msg or "不能为空" in msg:
+        return ERR_BAD_PARAMS
+    if "手机号" in msg or "号码" in msg:
+        return ERR_BAD_MOBILE
     return ERR_UNKNOWN
 
 
@@ -172,8 +178,6 @@ class AccountLogin:
         msg = str(payload.get("msg", payload.get("message", "")))
 
         # 成功判定
-        if code in (0, "0", 200, "200") and not str(msg):
-            code = 0
         if code in (0, "0", 200, "200"):
             token = _pick_token(payload)
             if token:
