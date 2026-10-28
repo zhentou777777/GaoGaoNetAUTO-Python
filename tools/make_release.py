@@ -41,7 +41,7 @@ except Exception:
 # 脚本在 tools/ 下，项目根要向上一层
 HERE = Path(__file__).resolve().parent.parent
 NAME = "GaoGaoNetAUTO"
-VERSION = "1.0.2"
+VERSION = "1.0.3"
 
 # 源码包要带的文件
 # ⚠️ 交付包一律用**英文文件名**：中文名上传 GitHub Release 会 HTTP 404
@@ -143,10 +143,14 @@ def build_source_zip(out_dir: Path) -> Path | None:
     except Exception:
         pass
     # 文档包
-    docpkg = HERE / "dist" / "文档包"
-    if docpkg.is_dir():
-        for z in docpkg.glob("*.zip"):
-            shutil.copy2(z, stage / z.name)
+    #
+    # ⚠️ 文档 zip 的最终位置是 ``release/``（make_docs_package.py 的输出目录），
+    #    ``dist/文档包/`` 下只有解开的中间目录。旧代码 glob 的是后者，
+    #    从来没匹配到任何 zip —— 源码包里一直是「说有文档包、实际没有」。
+    for base in (release_dir(), HERE / "dist" / "文档包"):
+        if base.is_dir():
+            for z in base.glob(f"{NAME}-v{VERSION}-docs.zip"):
+                shutil.copy2(z, stage / z.name)
     dst = out_dir / f"{NAME}-v{VERSION}-source.zip"
     print(f"[3/3] 打包源码绿色包 …")
     _zip_dir(stage, dst, f"{NAME}-源码-v{VERSION}")

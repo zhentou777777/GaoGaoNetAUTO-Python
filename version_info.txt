@@ -11,8 +11,8 @@
 #
 VSVersionInfo(
   ffi=FixedFileInfo(
-    filevers=(1, 0, 2, 0),
-    prodvers=(1, 0, 2, 0),
+    filevers=(1, 0, 3, 0),
+    prodvers=(1, 0, 3, 0),
     mask=0x3f,
     flags=0x0,
     OS=0x40004,
@@ -27,12 +27,12 @@ VSVersionInfo(
           '080404B0',
           [StringStruct('CompanyName', '糕糕网络'),
            StringStruct('FileDescription', '糕糕校园网自动认证'),
-           StringStruct('FileVersion', '1.0.2.0'),
+           StringStruct('FileVersion', '1.0.3.0'),
            StringStruct('InternalName', 'GaoGaoNetAUTO'),
            StringStruct('LegalCopyright', 'Copyright (c) 2026 糕糕网络'),
            StringStruct('OriginalFilename', 'GaoGaoNetAUTO.exe'),
            StringStruct('ProductName', '糕糕校园网自动认证'),
-           StringStruct('ProductVersion', '1.0.2.0')])
+           StringStruct('ProductVersion', '1.0.3.0')])
       ]),
     VarFileInfo([VarStruct('Translation', [2052, 1200])])
   ]

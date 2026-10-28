@@ -6,7 +6,7 @@
 
 ---
 
-## [未发布] — 2026-10-28
+## [1.0.3] — 2026-10-28
 
 ### 修复
 
@@ -29,6 +29,13 @@
 ### 测试
 
 pytest 84 → **89 项**（开机自启的兜底写入、过期识别、失败回滚配置开关）。
+
+### 文档与版本
+
+- 文档里的交付包文件名同步到 v1.0.3（`生产交接文档` / `Defender-误报排查`），
+  HTML 由 `tools/make_docs_package.py` 重新生成。
+- 版本号 1.0.2 → 1.0.3（`version_info.txt` / `tools/make_release.py` /
+  `tools/make_docs_package.py` 三处同步）。
 
 ## [1.0.2] — 2026-10-26
 
@@ -218,5 +225,7 @@ pytest 84 → **89 项**（开机自启的兜底写入、过期识别、失败�
 - 校园网网关为明文 HTTP（协议决定，厂商侧支持才能改）
 - 自签名不等于 SmartScreen 放行，根治需采购正规证书
 
+[1.0.3]: https://github.com/zhentou777777/GaoGaoNetAUTO-Python/releases/tag/v1.0.3
+[1.0.2]: https://github.com/zhentou777777/GaoGaoNetAUTO-Python/releases/tag/v1.0.2
 [1.0.1]: https://github.com/zhentou777777/GaoGaoNetAUTO-Python/releases/tag/v1.0.1
 [1.0.0]: https://github.com/zhentou777777/GaoGaoNetAUTO-Python/releases/tag/v1.0.0
