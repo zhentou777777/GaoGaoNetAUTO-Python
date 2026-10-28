@@ -549,10 +549,17 @@ def _make_handler(app: WebApp):
 
             if path == "/api/settings/save":
                 ok, msg = c.save_settings(data)
+                note = ""
+                if ok and "autostart" in data:
+                    # 自启开关的成败要回给界面 —— 失败时只写日志的话，
+                    # 用户只会看到勾选又被取消，完全不知道为什么。
+                    aok, amsg = c.apply_autostart(bool(data.get("autostart")))
+                    if not aok:
+                        note = amsg
                 if ok:
-                    c.apply_autostart(bool(data.get("autostart")))
                     c.emit("info")
-                self._json({"ok": ok, "message": msg})
+                self._json({"ok": ok,
+                            "message": msg + (("\n" + note) if note else "")})
                 return
 
             if path == "/api/settings/clear":

@@ -787,10 +787,17 @@ class Controller:
                 migrate_autostart_legacy()
         else:
             self.log(msg)
+            # 没写成就不把开关留在「开」的状态 —— 否则每次启动都要再失败一次，
+            # 用户还会以为自启已经生效了。
+            if enable:
+                self.cfg.set("autostart", False)
+                self.emit("info")
         return ok, msg
 
     def sync_autostart(self):
         """把「启动文件夹里的实际文件」与「配置里的开关」对齐。"""
+        from autostart import autostart_stale
+
         want = bool(self.cfg.get("autostart", False))
         have = self.autostart_enabled()
         if want and not have:
@@ -799,6 +806,11 @@ class Controller:
         elif have and not want:
             self.apply_autostart(False)
             self.log("已按配置清理开机自启")
+        elif want and have and autostart_stale():
+            # 文件在但内容过期（程序换了位置）—— 开机静默启动一个不存在的
+            # 路径，比没有自启更难排查。重写一次。
+            self.log("开机自启条目已过期（程序路径变了），正在重写…")
+            self.apply_autostart(True)
 
     def delayed_login(self, seconds: int):
         """延迟若干秒后自动认证（开机时网络尚未就绪）。"""
