@@ -6,6 +6,80 @@
 
 ---
 
+## [1.0.5] — 2026-10-31
+
+### 修复
+
+- **配置写盘改成原子替换**（`config.py`）：原先是直接覆盖 `config.json`，
+  写到一半被杀进程 / 断电就留下半截 JSON —— 下次启动读不出来，用户看到的
+  是「凭据凭空消失」，而且备份文件是同样的写法，一起坏。现在先写
+  `config.json.tmp` 再 `os.replace`，写失败时旧配置完好无损。
+- **配置读坏不再静默**（`config.py`）：半截 JSON / 空文件以前被 `continue`
+  悄悄跳过，表现为「怎么又要重新登录」。现在记进 `read_error`，启动日志
+  里能直接看到「config.json 内容损坏」。
+- **只改网关地址会把开关一起关掉**（`core.py`）：`save_settings` 里
+  `autostart` / `auto_kick_phone` 原先是无条件 `bool(data.get(...))`，
+  请求里没带这两个字段就等于把它们设成 `False`。现在只在请求带了才写。
+- **账号密码换到的 Token 会被丢掉**（`auth.py` / `core.py`）：自愈链路
+  换到新 Token 后，如果紧接着那次认证失败，Token 就没了 —— 下次启动又要
+  再换一次，白白多一次登录（服务端风控会记账，连续失败会熔断）。现在换到
+  就立刻落盘，并把旧的留作 `token_prev`；同时把 `core` 的续存判断改成和
+  「当前已存的 Token」比，避免把 `token_prev` 写成新 Token 自己、让回退
+  兜底失效。
+- **Web 版第二次双击没反应**（`main.py`）：单实例锁拦下第二次启动后，
+  原代码去 `FindWindow` 找 Tk 窗口 —— Web 版根本没有窗口，什么都找不到，
+  于是静默返回。现在改为打开已有实例的 `webui.url`（带令牌）。
+- **单实例锁创建失败会静默退出**（`taskbar.py`）：`CreateMutexW` 返回
+  NULL 时原逻辑返回 `False`（当作「已有实例」），程序直接退出、用户
+  双击多少次都没反应。现在创建失败就放行。
+- **Cookie 鉴权用子串匹配**（`webui.py`）：`f"gg_token={token}" in cookie`
+  改成逐项解析 + `compare_digest`，避免伪造的、把真 token 当子串的
+  cookie 混过去。
+- **`index.html` 缺失时甩 traceback**（`webui.py`）：改成 500 + 人话提示。
+- **连点「刷新」会跑出两个扫码轮询**（`core.py`）：取消标记改成通过参数
+  传给线程，不再在线程里回头读 `self._qr_cancel`（那时可能已被下一次
+  刷新换掉）。
+- **历史配置迁移会污染临时目录**（`config.py`）：`Config(path)` 显式指定
+  文件、或设了 `GAOGAO_DATA_DIR`（便携 / 测试）时不再从
+  `C:\GaoGaoNetAUTO` 搬旧配置 —— 否则测试结果随「这台机器有没有装过
+  旧版」而变。
+
+### 测试
+
+- 101 → 103 项，新增覆盖：配置损坏留痕、主备回退、原子写失败保护、
+  部分更新语义、Token 轮换落盘、Cookie 精确比对。
+
+## [1.0.4] — 2026-10-31
+
+### 修复
+
+- **自启写入再稳一层**（`autostart.py`）：v1.0.3 的兜底只有「直写 → 临时
+  文件替换」两条路，仍可能被瞬时拦截打成失败。现在：
+  - 内容已经一致就**不写** —— 白挨一次杀软扫描不说，还可能「明明已经生效
+    却报失败」，然后 core 把配置里的开关拨回「关」，下次启动再白忙一遍；
+  - 三条写法轮换（直写 / 临时文件替换 / 挪开再建），三种写法的权限要求
+    不一样，一条被拦不代表全被拦；
+  - 失败后隔 120/240ms 重试，共 3 轮（这类拦截基本是毫秒级抖动）；
+  - 全部失败时**复查文件实际内容**，已经对了就当成功；
+  - 报错里带上启动项的完整路径和「文件是否存在」，并给出
+    `icacls <路径> /reset` 这条恢复命令（空 DACL 的情况）。
+- **Tk 界面的自启实现删掉了**（`legacy/tkui.py`）：那是第二份代码，没有
+  重试、没有兜底、也不清只读属性，同一个动作在两套界面上成功率不一样。
+  现在只转发给 `autostart` 模块。
+- **配置写不进去不再静默**（`config.py` / `core.py`）：`save()` 以前吞掉
+  所有异常，界面照样提示「Token 已保存」，重启后又要重新登录，完全查不出
+  原因。现在 `save()` 返回是否成功，`Config.storage_problem()` 给出
+  「读不了 / 写不进去」的原因，启动时写进日志并打印配置文件路径。
+- **启动检查根本没被调用**（`main.py`）：`Controller.startup_checks()`
+  定义了却没人调，于是「自启开关开着却不会自动认证」「配置里的自启状态和
+  启动文件夹里的文件长期对不上」，启动过程日志也一行不写。现在 Web 界面
+  起来后在后台跑它（它会发网络请求，不能挡住界面）。
+- **开机自启不再弹浏览器**（`main.py`）：`--silent` 启动时跳过
+  `open_browser()`，入口走托盘「打开界面」。
+- **测试里 Tk 变量的回收顺序**（`tests/test_gaogao.py`）：`Variable.__del__`
+  会在 Tcl 解释器销毁后才被 GC 调到，抛 unraisable 异常，还会让后面的
+  Web HTTP 测试莫名超时。改为先回收变量再 `destroy()`。
+
 ## [1.0.3] — 2026-10-28
 
 ### 修复
@@ -225,6 +299,8 @@ pytest 84 → **89 项**（开机自启的兜底写入、过期识别、失败�
 - 校园网网关为明文 HTTP（协议决定，厂商侧支持才能改）
 - 自签名不等于 SmartScreen 放行，根治需采购正规证书
 
+[1.0.5]: https://github.com/zhentou777777/GaoGaoNetAUTO-Python/releases/tag/v1.0.5
+[1.0.4]: https://github.com/zhentou777777/GaoGaoNetAUTO-Python/releases/tag/v1.0.4
 [1.0.3]: https://github.com/zhentou777777/GaoGaoNetAUTO-Python/releases/tag/v1.0.3
 [1.0.2]: https://github.com/zhentou777777/GaoGaoNetAUTO-Python/releases/tag/v1.0.2
 [1.0.1]: https://github.com/zhentou777777/GaoGaoNetAUTO-Python/releases/tag/v1.0.1

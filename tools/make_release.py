@@ -41,7 +41,7 @@ except Exception:
 # 脚本在 tools/ 下，项目根要向上一层
 HERE = Path(__file__).resolve().parent.parent
 NAME = "GaoGaoNetAUTO"
-VERSION = "1.0.3"
+VERSION = "1.0.5"
 
 # 源码包要带的文件
 # ⚠️ 交付包一律用**英文文件名**：中文名上传 GitHub Release 会 HTTP 404
