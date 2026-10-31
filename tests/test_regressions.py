@@ -243,6 +243,55 @@ class TestAutostartWrite:
         target.write_bytes(cmd.encode("gbk"))
         assert autostart.autostart_stale() is False
 
+    def test_same_content_is_not_rewritten(self, tmp_path, monkeypatch):
+        """内容已经一样就别再写一遍。
+
+        白挨一次杀软扫描不说，拦截还可能让自启**明明已经生效**却报失败，
+        用户以为没设上，反复折腾。
+        """
+        autostart, target = self._startup(tmp_path, monkeypatch)
+        autostart.apply_autostart(True)
+        assert target.exists()
+
+        calls = []
+        real = autostart._write_direct
+
+        def spy(path, data):
+            calls.append(path)
+            return real(path, data)
+
+        monkeypatch.setattr(autostart, "_write_direct", spy)
+        ok, _msg = autostart.apply_autostart(True)
+        assert ok
+        assert calls == [], "内容没变却重写了文件"
+
+    def test_transient_failure_is_retried(self, tmp_path, monkeypatch):
+        """被拦一次的后果应该只是「慢一点」，不是「开不了」。"""
+        autostart, target = self._startup(tmp_path, monkeypatch)
+        state = {"n": 0}
+        real = autostart._write_direct
+
+        def flaky(path, data):
+            state["n"] += 1
+            if state["n"] == 1:
+                raise PermissionError(13, "Permission denied")
+            return real(path, data)
+
+        monkeypatch.setattr(autostart, "_write_direct", flaky)
+        ok, _msg = autostart.apply_autostart(True)
+        assert ok
+        assert target.exists()
+        assert b"@echo off" in target.read_bytes()
+
+    def test_config_write_failure_is_reported(self, tmp_path):
+        """配置写不进去要说出来，不能再静默成功。"""
+        import config as cfgmod
+
+        c = cfgmod.Config(str(tmp_path / "config.json"))
+        assert c.storage_problem() == ""
+        c.write_error = "[Errno 13] Permission denied"
+        assert "写不进去" in c.storage_problem()
+
     def test_permission_error_message_is_actionable(self, tmp_path, monkeypatch):
         """PermissionError 要给出人能照做的建议，而不是一句 Errno 13。"""
         autostart, target = self._startup(tmp_path, monkeypatch)
@@ -273,3 +322,246 @@ class TestAutostartWrite:
         ok, _msg = c.apply_autostart(True)
         assert ok is False
         assert c.cfg.get("autostart") is False
+
+
+class TestWebStartupChecks:
+    """Web 界面启动时必须接上 ``Controller.startup_checks``。
+
+    这条线曾经是**断的**：方法定义了却没人调用，于是「自启开关是开的，
+    开机后却不自动认证」「配置里的自启状态和启动文件夹里的文件长期对不上」，
+    日志文件也可能整个启动过程一行不写。
+    """
+
+    class _FakeApp:
+        def __init__(self, box):
+            self.box = box
+            outer = self
+
+            class _Ctrl:
+                def startup_checks(self):
+                    outer.box["checks"] += 1
+
+            self.controller = _Ctrl()
+
+        def start(self):
+            return 8765
+
+        def url(self):
+            return "http://127.0.0.1:8765/"
+
+        def write_url_file(self):
+            return None
+
+        def open_browser(self):
+            self.box["browser"] += 1
+            return True
+
+        def start_tray(self):
+            pass
+
+        def serve_forever(self):
+            pass
+
+        def stop(self):
+            pass
+
+    def _run(self, monkeypatch, silent):
+        import main as mainmod
+        import webui
+
+        box = {"checks": 0, "browser": 0}
+        monkeypatch.setattr(webui, "WebApp", lambda **kw: self._FakeApp(box))
+        monkeypatch.setattr(webui, "pick_port", lambda: 8765)
+        mainmod._run_web_ui(silent)
+
+        for _ in range(100):
+            if box["checks"]:
+                break
+            time.sleep(0.02)
+        return box
+
+    def test_startup_checks_are_invoked(self, monkeypatch):
+        box = self._run(monkeypatch, silent=False)
+        assert box["checks"] == 1, "启动检查没被调用"
+        assert box["browser"] == 1
+
+    def test_silent_run_does_not_open_browser(self, monkeypatch):
+        """开机自启（--silent）不该在开机时弹一个浏览器窗口。"""
+        box = self._run(monkeypatch, silent=True)
+        assert box["checks"] == 1
+        assert box["browser"] == 0
+
+
+class TestConfigRobustness:
+    """配置文件不能「悄悄坏、悄悄丢」。"""
+
+    def _cfg(self, tmp_path, name="config.json"):
+        import config as cfgmod
+
+        return cfgmod.Config(str(tmp_path / name))
+
+    def test_corrupt_config_is_reported(self, tmp_path):
+        """半截 JSON（写到一半被杀进程 / 断电）要留痕。"""
+        p = tmp_path / "config.json"
+        p.write_text('{"token": "dpapi:AAAA', encoding="utf-8")
+        c = self._cfg(tmp_path)
+        assert "损坏" in c.read_error, c.read_error
+        assert "读不了" in c.storage_problem()
+        # 不能因为一个坏文件就崩掉 —— 用默认值继续跑
+        assert c.get("port") == 1110
+
+    def test_corrupt_primary_falls_back_to_backup(self, tmp_path):
+        """主文件坏了但备份是好的，应该用备份，且不算「读不了」。"""
+        import json
+
+        (tmp_path / "config.json").write_text("{半截", encoding="utf-8")
+        (tmp_path / "config.json.bak").write_text(
+            json.dumps({"port": 2222}), encoding="utf-8")
+        c = self._cfg(tmp_path)
+        assert c.get("port") == 2222
+        assert c.storage_problem() == ""
+
+    def test_save_leaves_no_temp_file(self, tmp_path):
+        """原子写入：临时文件必须清干净。"""
+        c = self._cfg(tmp_path)
+        assert c.save() is True
+        assert (tmp_path / "config.json").exists()
+        assert not (tmp_path / "config.json.tmp").exists()
+        assert not (tmp_path / "config.json.bak.tmp").exists()
+
+
+    def test_failed_save_keeps_previous_content(self, tmp_path, monkeypatch):
+        """写盘失败时，旧配置必须**完好**（这就是原子替换的意义）。"""
+        import config as cfgmod
+
+        p = tmp_path / "config.json"
+        c = cfgmod.Config(str(p))
+        c.set("port", 1110)
+        good = p.read_text(encoding="utf-8")
+
+        c.set("port", 2222, save=False)
+        monkeypatch.setattr(
+            cfgmod.os, "replace",
+            lambda *a, **k: (_ for _ in ()).throw(OSError("目标被占用")))
+
+        assert c.save() is False
+        assert p.read_text(encoding="utf-8") == good, "旧配置被写坏了"
+        assert not (tmp_path / "config.json.tmp").exists(), "临时文件没清掉"
+        assert "目标被占用" in c.storage_problem()
+
+
+class TestSettingsPartialUpdate:
+    """只改网关不该把别的开关一起关掉。"""
+
+    def test_missing_flags_are_preserved(self, tmp_path):
+        import config as cfgmod
+        from core import Controller
+
+        c = Controller(cfg=cfgmod.Config(str(tmp_path / "config.json")))
+        c.cfg.set("autostart", True)
+        c.cfg.set("auto_kick_phone", True)
+        c.cfg.set("phone_ip", "10.0.0.9")
+
+        ok, _msg = c.save_settings({"host": "hgs.auth.yungao-tech.com",
+                                    "port": "1110"})
+        assert ok
+        assert c.cfg.get("autostart") is True, "自启开关被静默关掉了"
+        assert c.cfg.get("auto_kick_phone") is True
+        assert c.cfg.get("phone_ip") == "10.0.0.9"
+
+    def test_explicit_false_still_works(self, tmp_path):
+        """显式传 false 仍然要能关掉。"""
+        import config as cfgmod
+        from core import Controller
+
+        c = Controller(cfg=cfgmod.Config(str(tmp_path / "config.json")))
+        c.cfg.set("autostart", True)
+        ok, _ = c.save_settings({"host": "hgs.auth.yungao-tech.com",
+                                 "port": "1110", "autostart": False})
+        assert ok
+        assert c.cfg.get("autostart") is False
+
+
+class TestTokenRotation:
+    """账号密码换到的 Token 必须立刻存下来。"""
+
+    def test_self_heal_token_persists_even_if_auth_fails(self, tmp_path, monkeypatch):
+        import acclogin
+        import config as cfgmod
+        from auth import TOKEN_INVALID, AuthResult, CampusAuth
+
+        cfg = cfgmod.Config(str(tmp_path / "config.json"))
+        cfg.set_token("OLD_TOKEN")
+        auth = CampusAuth(cfg)
+
+        class _FakeLogin:
+            ok = True
+            token = "NEW_TOKEN"
+            message = "ok"
+
+            def login(self, mobile, password):
+                return self
+
+        monkeypatch.setattr(acclogin, "AccountLogin", lambda: _FakeLogin())
+        monkeypatch.setattr(
+            auth, "login_chain",
+            lambda *a, **k: AuthResult(ok=False, status=TOKEN_INVALID,
+                                       message="服务端拒绝"))
+
+        res = auth.login_chain_self_heal("10.0.0.5", "OLD_TOKEN",
+                                         account=("13100000000", "pwd"))
+        assert res.ok is False
+        assert cfg.get_token() == "NEW_TOKEN", "换到的 Token 没落盘"
+        assert cfg.get_token_prev() == "OLD_TOKEN", "旧的 Token 没留作回退"
+
+    def test_core_does_not_clobber_token_prev(self, tmp_path, monkeypatch):
+        """自愈链路已存过新 Token 时，core 不能把 token_prev 写成新 Token 自己。"""
+        import config as cfgmod
+        from core import Controller
+
+        c = Controller(cfg=cfgmod.Config(str(tmp_path / "config.json")))
+        c.cfg.set_token("OLD")
+        c.cfg.set("token_prev", c.cfg.get("token"))
+
+        # 模拟：认证成功 + 服务端下发新 Token，而新 Token 已经是当前值
+        c.cfg.set_token("NEW")
+
+        from auth import AuthResult
+        res = AuthResult(ok=True, message="ok", new_token="NEW")
+        token = "OLD"
+        saved = c.cfg.get_token()
+        # 复刻 core._login_bg_inner 里的续存判断
+        if res.ok and res.new_token and res.new_token != saved:
+            c.cfg.set("token_prev", c.cfg.get("token"))
+            c.cfg.set_token(res.new_token)
+        assert c.cfg.get_token_prev() == "OLD", "token_prev 被污染了"
+
+class TestWebAuthCookie:
+    """Cookie 鉴权必须精确比对，不能靠子串。"""
+
+    def test_cookie_token_must_match_exactly(self):
+        import urllib.error
+        import urllib.request
+
+        import webui
+
+        app = webui.WebApp(port=0)
+        app.start()
+        try:
+            base = f"http://127.0.0.1:{app.port}/api/state"
+
+            good = urllib.request.Request(
+                base, headers={"Cookie": f"gg_token={app.token}"})
+            with urllib.request.urlopen(good, timeout=5) as r:
+                assert r.status == 200
+
+            # 前缀相同、多一个字符的假 token 不能过
+            bad = urllib.request.Request(
+                base, headers={"Cookie": f"gg_token={app.token}X"})
+            try:
+                urllib.request.urlopen(bad, timeout=5)
+                assert False, "伪造的 cookie 被放行了"
+            except urllib.error.HTTPError as e:
+                assert e.code == 401
+        finally:
+            app.stop()

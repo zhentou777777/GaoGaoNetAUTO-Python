@@ -180,10 +180,19 @@ def build(onefile: bool = False, clean: bool = True) -> int:
     if onefile:
         stale = HERE / "dist" / NAME
         if stale.is_dir():
-            stash = HERE / "dist" / f"_stash_{NAME}"
+            # ⚠️ 暂存目录重名时**换个名字**，千万别去 rmtree 旧的：
+            # onedir 是上千个文件，`shutil.rmtree` 会触发批量删除保护，
+            # `ignore_errors=True` 把它吞掉之后，`rename` 又因为目标已存在
+            # 而失败 —— 于是旧目录既没删掉也没挪走，PyInstaller 的
+            # `--noconfirm` 自己去删又被拦，整个打包就死在这一步
+            # （日志里只有一句「打包失败」，看不出原因）。
+            base = HERE / "dist" / f"_stash_{NAME}"
+            stash = base
+            n = 1
+            while stash.exists():
+                stash = base.with_name(f"{base.name}_{n}")
+                n += 1
             try:
-                if stash.exists():
-                    shutil.rmtree(stash, ignore_errors=True)
                 stale.rename(stash)
                 print(f"  （已暂存旧的 onedir 产物 → {stash}）")
             except Exception as exc:

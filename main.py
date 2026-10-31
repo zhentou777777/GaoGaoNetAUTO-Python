@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import sys
+import threading
 
 import logs
 from config import logs_dir
@@ -41,10 +42,23 @@ def _run_web_ui(silent: bool) -> int:
     # ⚠️ 这里**不能**用 activate_existing_instance() 判断「是不是首个实例」——
     # 单实例锁在 main() 里已经拿过了，那个函数是用来「把已有实例的
     # 窗口顶到前台」的，在 Web 模式下没有窗口可顶，只会白白失败一次。
-    app.open_browser()
+    # 开机自启（--silent）不弹浏览器 —— 那时候用户多半不在电脑前，
+    # 弹出来只是变成一个开机就冒出来的窗口。要靠托盘「打开界面」进去。
+    if not silent:
+        app.open_browser()
     # 打包版是 --windowed（没有控制台），托盘是用户唯一的入口：
     # 右键 → 打开界面 / 立即认证 / 退出
     app.start_tray()
+
+    # 启动检查：自启条目与配置对齐 / Token 体检 / 该认证时延迟自动认证。
+    #
+    # 以前这条线是**断的**：``Controller.startup_checks()`` 定义了却没人
+    # 调用。表现是「自启开关是开的，但开机后不会自动认证」「配置里的自启
+    # 状态和启动文件夹里的文件长期对不上」。它会发网络请求，必须放后台，
+    # 不能挡着界面起来。
+    threading.Thread(
+        target=app.controller.startup_checks, daemon=True
+    ).start()
 
     if not silent:
         print("=" * 62)
@@ -80,6 +94,31 @@ def _run_tk_ui(silent: bool) -> int:
     return run_tk_ui(silent)
 
 
+def _open_running_instance() -> bool:
+    """把已经在跑的实例的界面打开。
+
+    Web 版**没有窗口**可以顶到前台（``activate_existing_instance`` 找的是
+    Tk 窗口，永远是 False），所以第二次双击 exe 时以前是「什么都没发生」——
+    用户以为程序坏了，又双击几次。
+
+    地址写在数据目录的 ``webui.url`` 里（带一次性令牌），直接打开它。
+    """
+    try:
+        from config import data_dir
+
+        url = (data_dir() / "webui.url").read_text(encoding="utf-8").strip()
+    except Exception:
+        return False
+    if not url.startswith("http://127.0.0.1:"):
+        return False
+    try:
+        import webbrowser
+
+        return webbrowser.open(url)
+    except Exception:
+        return False
+
+
 def main() -> int:
     silent = "--silent" in sys.argv
     use_tk = "--tk" in sys.argv
@@ -100,7 +139,9 @@ def main() -> int:
         # 开机自启（--silent）撞上已在跑的实例时保持安静，
         # 否则会在用户没操作的情况下把窗口弹到前面。
         if not silent:
-            activate_existing_instance()
+            # Tk 版有真窗口；Web 版没有，退回「打开已有实例的页面」
+            if not activate_existing_instance():
+                _open_running_instance()
         return 0
 
     try:

@@ -12,10 +12,19 @@ from __future__ import annotations
 import os
 import re
 import sys
+import time
 from pathlib import Path
 from typing import Optional
 
 CMD_NAME = "GaoGaoNetAUTO.cmd"
+
+# 写入失败的重试次数与间隔。
+#
+# 启动文件夹是杀软重点盯防的位置，「往这里写 .cmd」很容易被实时防护、
+# 启动项保护之类的模块**短暂**拦一下 —— 拦完就放，隔一两百毫秒再试
+# 往往就过了。这属于典型的一次性抖动，不能当成永久失败。
+_WRITE_TRIES = 3
+_RETRY_DELAY = 0.12
 
 
 def startup_dir() -> Optional[Path]:
@@ -108,27 +117,112 @@ def _cmd_bytes() -> bytes:
             f"start \"\" {_entry_command()}\r\n").encode("gbk", errors="replace")
 
 
+def _exists(target: Optional[Path]) -> bool:
+    try:
+        return bool(target and target.exists())
+    except OSError:
+        return False
+
+
+def _same_bytes(target: Path, data: bytes) -> bool:
+    """目标文件内容是否已经是我们要写的这份（读不到一律当「不是」）。"""
+    try:
+        return target.is_file() and target.read_bytes() == data
+    except OSError:
+        return False
+
+
 def _write_direct(target: Path, data: bytes) -> None:
     _clear_attributes(target)
     target.write_bytes(data)
 
 
-def _write_cmd(target: Path, data: bytes) -> None:
-    """把自启脚本写下去，带一条兜底路径。
+def _write_via_replace(target: Path, data: bytes) -> None:
+    """临时文件 + 原子替换。
 
-    直接写失败（文件被占用 / 只读 / 被安全软件拦）时，改成
-    「同目录临时文件 + `os.replace` 原子替换」—— 替换只要求对**目录**
-    有删除权限，不少拦「打开文件写入」的方案放的是后者，这条路常常能过。
+    替换只要求对**目录**有删除权限，不少拦「打开已有文件写入」的方案
+    放的是后者，这条路常常能过。
     """
+    tmp = target.with_name(target.name + ".tmp")
+    try:
+        _clear_attributes(tmp)
+        tmp.write_bytes(data)
+        os.replace(tmp, target)
+    finally:
+        try:
+            if tmp.exists():
+                _clear_attributes(tmp)
+                tmp.unlink()
+        except OSError:
+            pass
+
+
+def _write_via_rename(target: Path, data: bytes) -> None:
+    """把旧文件挪开再新建。
+
+    最后一条路：有些方案不放「覆盖已有文件」，但放「改名」和「建新文件」。
+    写不进去时把旧的挪回来，不留下「两个都没有」的窗口。
+    """
+    bak = target.with_name(target.name + ".old")
+    try:
+        if bak.exists():
+            _clear_attributes(bak)
+            bak.unlink()
+    except OSError:
+        pass
+    moved = False
+    if target.exists():
+        _clear_attributes(target)
+        target.rename(bak)
+        moved = True
     try:
         _write_direct(target, data)
+    except OSError:
+        if moved:
+            try:
+                os.replace(bak, target)
+            except OSError:
+                pass
+        raise
+    if moved:
+        try:
+            _clear_attributes(bak)
+            bak.unlink()
+        except OSError:
+            pass
+
+
+def _write_cmd(target: Path, data: bytes) -> None:
+    """把自启脚本写下去，失败时换着法子重试。
+
+    三层意思：
+
+    1. **已经一样就不写** —— 内容没变还去覆盖一次，白挨一次杀软扫描，
+       还可能被拦下来报个假失败（自启其实早就生效了）。
+    2. **换策略** —— 直写 / 临时文件替换 / 挪开再建，三种写法的权限要求
+       不一样，一条被拦不代表全被拦。
+    3. **重试** —— 拦截大多是瞬时的，隔一两百毫秒再来一次通常就过了。
+    """
+    if _same_bytes(target, data):
         return
-    except PermissionError:
-        pass
-    tmp = target.with_name(target.name + ".tmp")
-    _clear_attributes(tmp)
-    tmp.write_bytes(data)
-    os.replace(tmp, target)
+
+    strategies = (_write_direct, _write_via_replace, _write_via_rename)
+    last: Optional[BaseException] = None
+    for attempt in range(_WRITE_TRIES):
+        for strategy in strategies:
+            try:
+                strategy(target, data)
+            except OSError as exc:
+                last = exc
+                continue
+            if _same_bytes(target, data):
+                return
+        if attempt + 1 < _WRITE_TRIES:
+            time.sleep(_RETRY_DELAY * (attempt + 1))
+
+    if last is not None:
+        raise last
+    raise PermissionError(13, "Permission denied", str(target))
 
 
 def _entry_target(text: str) -> str:
@@ -170,7 +264,16 @@ def apply_autostart(enable: bool) -> tuple:
         return False, "找不到「启动」文件夹，开机自启不可用"
     try:
         if enable:
-            _write_cmd(target, _cmd_bytes())
+            data = _cmd_bytes()
+            try:
+                _write_cmd(target, data)
+            except OSError:
+                # 写失败但文件其实已经是想要的样子（比如刚被另一个实例写好，
+                # 或者写的瞬间被拦了一下）—— 这就是成功，别报假失败。
+                # 假失败的代价很实在：core 会把配置里的开关拨回「关」，
+                # 用户以为自启没开，下次启动又白忙一遍。
+                if not _same_bytes(target, data):
+                    raise
             hide_file(target)
             return True, "已开启开机自启（启动文件夹）"
         if target.exists():
@@ -181,12 +284,17 @@ def apply_autostart(enable: bool) -> tuple:
         # PermissionError 在「启动」文件夹上最常见的原因不是 Windows 权限，
         # 而是安全软件的「启动项保护」或文件正被占用。给出可操作的建议，
         # 别让用户对着一句 Errno 13 发呆。
+        state = "已存在" if _exists(target) else "不存在"
         return False, (
             f"设置开机自启失败：没有权限写入「启动」文件夹（{exc}）\n"
+            f"启动项文件路径：{target}（{state}）\n"
             "常见原因：360 / 火绒等安全软件的「启动项保护」拦下了写入，"
             "或该文件正被其他程序占用。\n"
-            "手动做法：按 Win+R 输入 shell:startup 打开启动文件夹，"
-            "把程序 exe 的快捷方式放进去即可。"
+            "手动做法 1：按 Win+R 输入 shell:startup 打开启动文件夹，"
+            "把程序 exe 的快捷方式放进去即可。\n"
+            "手动做法 2：如果那里已经有一个 GaoGaoNetAUTO.cmd 但删不掉，"
+            "它的文件权限可能坏了（属性→安全 里一片空白），"
+            "用管理员身份执行 icacls \"<上面那个路径>\" /reset 即可修回来。"
         )
     except OSError as exc:
         return False, f"设置开机自启失败: {exc}"

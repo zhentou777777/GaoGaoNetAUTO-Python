@@ -68,12 +68,16 @@ def acquire_single_instance() -> bool:
     ]
     handle = _kernel32.CreateMutexW(None, True, _MUTEX_NAME)
     err = ctypes.get_last_error()
+    if not handle:
+        # 创建失败（资源不足 / 权限异常）不能当成「已有实例在跑」——
+        # 那样程序会静默退出，用户双击多少次都没反应。
+        # 宁可多开一个实例，也别把人挡在门外。
+        return True
     # 183 = ERROR_ALREADY_EXISTS
-    if handle and err != 183:
+    if err != 183:
         _mutex_handle = handle
         return True
-    if handle:
-        _kernel32.CloseHandle(handle)
+    _kernel32.CloseHandle(handle)
     return False
 
 

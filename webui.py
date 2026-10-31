@@ -339,8 +339,12 @@ def _make_handler(app: WebApp):
                 return True
             # 页面里注入的 token（供 fetch 用）
             cookie = self.headers.get("Cookie", "")
-            if f"gg_token={app.token}" in cookie:
-                return True
+            if cookie:
+                for part in cookie.split(";"):
+                    name, _, value = part.strip().partition("=")
+                    if name == "gg_token" and value:
+                        if secrets.compare_digest(value, app.token):
+                            return True
             return False
 
         def _json(self, data, status: int = 200):
@@ -427,7 +431,13 @@ def _make_handler(app: WebApp):
                     self._error("访问令牌无效 —— 请通过程序启动时给出的链接打开",
                                 403)
                     return
-                html = (_web_assets_dir() / "index.html").read_bytes()
+                try:
+                    html = (_web_assets_dir() / "index.html").read_bytes()
+                except OSError:
+                    # 资源没打进包 / 被删了 —— 给一句人话，别甩一个 traceback
+                    self._error("界面资源缺失（index.html 读不到），请重新安装程序",
+                                500)
+                    return
                 self.send_response(200)
                 self.send_header(
                     "Set-Cookie",

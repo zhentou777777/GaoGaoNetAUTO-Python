@@ -263,10 +263,25 @@ class TestGuiSmoke:
         a.auth = FakeAuth()
         a._build()
         yield a
+        # 先回收 tkinter 的变量，再销毁 Tcl 解释器 —— 顺序反了会出事。
+        #
+        # ``StringVar`` / ``BooleanVar`` 的 ``__del__`` 里会调 ``self._tk``，
+        # 如果解释器已经销毁，它会在**之后任意时刻**抛 unraisable 异常；
+        # 有些环境下这次调用还会卡住几秒，而它偏偏落在后面的某个测试里 ——
+        # 表现为「Web 界面的 HTTP 测试莫名其妙超时」，跟被测代码毫无关系。
+        import gc
+
+        try:
+            a.root = None
+            a.__dict__.clear()
+            gc.collect()          # 趁 Tcl 还活着把这些变量收掉
+        except Exception:
+            pass
         try:
             root.destroy()
         except Exception:
             pass
+        gc.collect()
 
     def test_btn_login_is_assigned(self, app):
         """「立即认证」按钮必须被保存 —— 曾因重构丢失导致全线失效。"""

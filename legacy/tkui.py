@@ -1774,36 +1774,20 @@ class App:
 
         **不用注册表 Run 项**（``HKCU\\...\\CurrentVersion\\Run`` 属于
         Defender T1547.001「注册表自启动/持久化」的高危特征，容易被杀软
-        直接拦下）。改为在「启动」文件夹放一个 ``.cmd`` 快捷脚本，
-        行为等价但特征风险低得多。
+        直接拦下）。改为在「启动」文件夹放一个 ``.cmd`` 快捷脚本，行为
+        等价但特征风险低得多。
+
+        真正的写入逻辑在 ``autostart`` 模块里（Web 版共用同一份），这里
+        只负责转发。以前这里是**另一套**实现 —— 没有重试、没有兜底、
+        也不清只读属性，于是同一个动作在两套界面上的成功率不一样。
         """
         if sys.platform != "win32":
             return
-        target = self._startup_cmd_path()
-        if target is None:
-            self.log("找不到「启动」文件夹，开机自启不可用")
-            return
         try:
-            if enable:
-                if getattr(sys, "frozen", False):
-                    cmd = f'"{sys.executable}" --silent'
-                else:
-                    pythonw = Path(sys.executable).with_name("pythonw.exe")
-                    exe = pythonw if pythonw.exists() else Path(sys.executable)
-                    cmd = f'"{exe}" "{Path(__file__).resolve()}" --silent'
-                # .cmd 由 cmd.exe 读取，中文必须用 GBK（系统 ANSI 代码页），
-                # UTF-8 会变成乱码
-                target.write_bytes(
-                    ("@echo off\r\n"
-                     "rem 糕糕校园网自动认证 —— 开机自启\r\n"
-                     f"start \"\" {cmd}\r\n").encode("gbk", errors="replace")
-                )
-                self._hide_file(target)
-                self.log("已开启开机自启（启动文件夹）")
-            else:
-                if target.exists():
-                    target.unlink()
-                self.log("已关闭开机自启")
+            from autostart import apply_autostart
+
+            ok, msg = apply_autostart(enable)
+            self.log(msg)
         except Exception as exc:
             self.log(f"设置开机自启失败: {exc}")
 

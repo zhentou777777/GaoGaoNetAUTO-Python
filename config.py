@@ -249,9 +249,19 @@ class Config:
     """轻量配置容器，读改写 config.json。"""
 
     def __init__(self, path: Path | None = None):
+        # 调用方**显式指定**配置文件时不做历史迁移：既然明确了用哪份，
+        # 就不该再从别处搬一份过来盖掉它。
+        self._allow_legacy_migrate = path is None
         self.path = Path(path) if path else config_path()
         self.data: Dict[str, Any] = dict(DEFAULTS)
         self.migrated_from = ""
+        # 读写失败的原因（空串表示没出问题）。
+        #
+        # 以前这里把异常**整个吞掉**：文件写不进去，界面照样提示
+        # 「Token 已保存」，用户重启后发现又要重新登录，完全查不出原因。
+        # 现在至少把原因留下来，让启动日志能说人话。
+        self.read_error = ""
+        self.write_error = ""
         self.load()
         self._migrate_from_legacy()
         self._upgrade_encryption()
@@ -259,7 +269,15 @@ class Config:
     # -------------------------------------------------- 迁移
 
     def _legacy_candidates(self) -> list[Path]:
-        """历史上用过的配置位置（按优先级）。"""
+        """历史上用过的配置位置（按优先级）。
+
+        ⚠️ 数据目录是**显式指定**的（``GAOGAO_DATA_DIR``：便携模式 / 测试
+        隔离）时，一律不迁移。否则测试会把这台机器上 ``C:\\GaoGaoNetAUTO``
+        里的真实旧配置搬进临时目录 —— 测试结果随「这台机器有没有装过旧版」
+        而变，脏得莫名其妙。
+        """
+        if not self._allow_legacy_migrate or os.environ.get("GAOGAO_DATA_DIR"):
+            return []
         out: list[Path] = []
         legacy_root = Path(LEGACY_DATA_DIR)
         if legacy_root != self.path.parent:
@@ -324,6 +342,7 @@ class Config:
     # -------------------------------------------------- 读写
 
     def load(self) -> "Config":
+        self.read_error = ""
         for src in (self.path, self.path.parent / "config.json.bak"):
             if not src.exists():
                 continue
@@ -331,20 +350,66 @@ class Config:
                 raw = json.loads(src.read_text(encoding="utf-8"))
                 if isinstance(raw, dict):
                     self.data.update(raw)
+                    self.read_error = ""
                     break
-            except Exception:
-                continue
+            except PermissionError as exc:
+                # 文件在、但谁也读不了 —— 权限被改坏了（历史上改 ACL 的
+                # 代码出过这个事故），必须留痕，不能当成「没有配置」。
+                self.read_error = f"{src.name} 没有读取权限：{exc}"
+            except Exception as exc:
+                # 半截 JSON / 空文件（写的时候被杀进程、断电）。
+                # 以前这里是 `continue` 静默跳过 —— 用户只会看到
+                # 「怎么又要重新登录」，完全查不出为什么。
+                self.read_error = f"{src.name} 内容损坏：{exc}"
         return self
 
-    def save(self) -> None:
+    @staticmethod
+    def _atomic_write(target: Path, text: str) -> None:
+        """先写同目录临时文件，再原子替换。
+
+        直接 ``write_text`` 覆盖原文件，一旦写到一半被杀进程 / 断电，
+        config.json 就成了半截 JSON：下次启动读不出来，用户看到的是
+        「凭据凭空消失」，而且备份（同样的写法）也一起坏。
+        """
+        tmp = target.with_name(target.name + ".tmp")
+        try:
+            tmp.write_text(text, encoding="utf-8")
+            os.replace(tmp, target)
+        finally:
+            try:
+                if tmp.exists():
+                    tmp.unlink()
+            except OSError:
+                pass
+
+    def save(self) -> bool:
+        """落盘。返回是否真的写成功（失败原因记在 ``write_error``）。"""
         try:
             self.path.parent.mkdir(parents=True, exist_ok=True)
-            self.path.write_text(
-                json.dumps(self.data, ensure_ascii=False, indent=2), encoding="utf-8"
+            self._atomic_write(
+                self.path,
+                json.dumps(self.data, ensure_ascii=False, indent=2),
             )
             self._backup()
-        except Exception:
-            pass
+            self.write_error = ""
+            return True
+        except Exception as exc:
+            self.write_error = str(exc)
+            return False
+
+    def storage_problem(self) -> str:
+        """配置文件读/写不了的说明（正常时返回空串）。
+
+        给启动日志用 —— 「设置能改但存不住」是最难自查的一类故障，
+        至少要让它显形。
+        """
+        if self.read_error and self.write_error:
+            return f"配置文件读不了也写不了（{self.read_error}）"
+        if self.read_error:
+            return f"配置文件读不了（{self.read_error}）"
+        if self.write_error:
+            return f"配置文件写不进去，改动重启后会丢（{self.write_error}）"
+        return ""
 
     def _backup(self) -> None:
         """写一份备份，防止误删/写坏配置。
@@ -354,9 +419,9 @@ class Config:
         """
         try:
             bak = self.path.parent / "config.json.bak"
-            bak.write_text(
+            self._atomic_write(
+                bak,
                 json.dumps(self.data, ensure_ascii=False, indent=2),
-                encoding="utf-8",
             )
         except Exception:
             pass

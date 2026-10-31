@@ -238,12 +238,21 @@ class Controller:
         if not ok:
             return False, reason
 
-        self.cfg.set("phone_ip", str(data.get("phone_ip", "") or "").strip())
         self.cfg.set("host", host)
         self.cfg.set("port", port)
         self.cfg.set("scheme", scheme)
-        self.cfg.set("auto_kick_phone", bool(data.get("auto_kick_phone")))
-        self.cfg.set("autostart", bool(data.get("autostart")))
+        # 开关类字段只在**请求里带了**才写。
+        #
+        # 以前是无条件 `bool(data.get(...))` —— 调用方只发 host/port
+        # （改个网关地址）时，会把「开机自启」「自动顶替手机」两个开关
+        # 一起静默清成 False。前端目前总是发全量才没暴露，但接口这么写
+        # 是错的：少一个字段不等于「把它关掉」。
+        if "phone_ip" in data:
+            self.cfg.set("phone_ip", str(data.get("phone_ip", "") or "").strip())
+        if "auto_kick_phone" in data:
+            self.cfg.set("auto_kick_phone", bool(data.get("auto_kick_phone")))
+        if "autostart" in data:
+            self.cfg.set("autostart", bool(data.get("autostart")))
         return True, "设置已保存"
 
     def save_token(self, raw: str) -> tuple:
@@ -486,10 +495,16 @@ class Controller:
         # L1 自动续存：服务端下发了新 Token 就立刻换掉。
         # ⚠️ 只有认证**成功**时才存新 Token —— 失败响应里也可能带
         # token 字段，存进去会把本来还能用的 Token 覆盖掉。
-        if res.ok and res.new_token and res.new_token != token:
-            self.cfg.set("token_prev", self.cfg.get("token"))
-            self.cfg.set_token(res.new_token)
-            self.log("★ 检测到服务端下发了新 Token，已自动续存")
+        if res.ok and res.new_token:
+            # 比的是「当前已存的」而不是「本次认证用的」：自愈链路
+            # （账号密码换 Token）里已经先把新 Token 存过一遍了，这里
+            # 若再存一次，会把 token_prev 写成新 Token 自己 ——
+            # 回退到上一版 Token 那条兜底就彻底失效了。
+            saved = self.cfg.get_token()
+            if res.new_token != saved:
+                self.cfg.set("token_prev", self.cfg.get("token"))
+                self.cfg.set_token(res.new_token)
+                self.log("★ 检测到服务端下发了新 Token，已自动续存")
 
         if res.ok:
             self.cfg.set("last_ip", ip)
@@ -665,7 +680,11 @@ class Controller:
             self._qr_cancel.set()
         cancel = threading.Event()
         self._qr_cancel = cancel
-        threading.Thread(target=self._qr_bg, daemon=True).start()
+        # 取消标记**用参数传下去**，别在线程里回头读 self._qr_cancel：
+        # 用户连点两次「刷新」时，后一次会把属性换掉，前一个线程就拿到了
+        # 别人的标记 —— 两个轮询线程同时活着，对网关发双份请求。
+        threading.Thread(target=self._qr_bg, args=(cancel,),
+                         daemon=True).start()
 
     def cancel_qr(self):
         """取消扫码（关窗 / 刷新）。"""
@@ -675,17 +694,18 @@ class Controller:
         self._qr_assistant = None
         self._cleanup_qr_tmp()
 
-    def _qr_bg(self):
+    def _qr_bg(self, cancel: Optional[threading.Event] = None):
         try:
-            self._qr_bg_inner()
+            self._qr_bg_inner(cancel)
         except Exception as exc:
             self.log(f"扫码流程异常：{exc}")
             self.emit("qr_state", status="failed", message=f"扫码流程出错：{exc}")
         finally:
             self._cleanup_qr_tmp()
 
-    def _qr_bg_inner(self):
-        cancel = self._qr_cancel
+    def _qr_bg_inner(self, cancel: Optional[threading.Event] = None):
+        if cancel is None:
+            cancel = self._qr_cancel
         ip = self.auth.detect_local_ip()
         mac = self.auth.detect_mac()
         assistant = QrAssistant(self.auth, self.log)
@@ -824,6 +844,12 @@ class Controller:
 
     def startup_checks(self):
         self.emit("info")
+        # 配置读/写不了要说出来。否则表现为「设置改了但重启就没了」
+        # 「Token 存不住」，用户根本无从下手。
+        problem = self.cfg.storage_problem()
+        if problem:
+            self.log(f"⚠ {problem}")
+            self.log(f"配置文件位置：{self.cfg.path}")
         self.sync_autostart()
         if self.cfg.has_token():
             # 只读体检：走 onestatus，不会改变在线状态、不占名额

@@ -863,6 +863,25 @@ class CampusAuth:
 
     # ------------------------------------------------------------ 自愈认证
 
+    def _remember_token(self, new_token: str) -> None:
+        """把新 Token 立刻落盘，同时把旧的那份留作回退。
+
+        账号登录接口给的 Token 是**可信**的，必须马上存：后面那次认证
+        就算失败，也不该把这个 Token 丢掉 —— 否则下次启动又得用账号密码
+        再换一次，白白多一次登录，服务端风控是会记账的（连续失败会熔断）。
+        """
+        if not new_token:
+            return
+        try:
+            old_blob = str(self.cfg.get("token", "") or "")
+            old_plain = self.cfg.get_token()
+        except Exception:
+            return
+        if old_plain and old_plain != new_token:
+            # token_prev 存的是**密文原文**，直接搬
+            self.cfg.set("token_prev", old_blob)
+        self.cfg.set_token(new_token)
+
     def login_chain_self_heal(
         self,
         ip: str,
@@ -918,6 +937,8 @@ class CampusAuth:
             return res
 
         self.log("★ 已用账号密码换取新 Token，重新认证…")
+        # 先存再认证：换到的 Token 本身是有效的，认证失败是另一回事。
+        self._remember_token(lr.token)
         res2 = self.login_chain(ip, lr.token, phone_ip, kick_phone,
                                 takeover=takeover)
         if res2.ok:
