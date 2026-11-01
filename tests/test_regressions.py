@@ -565,3 +565,111 @@ class TestWebAuthCookie:
                 assert e.code == 401
         finally:
             app.stop()
+
+
+class TestStartupGuard:
+    """网络守护必须真的被拉起来，而且开机就断网时也要报警。"""
+
+    class _FakeAuth:
+        def detect_exit_ip(self):
+            return "10.0.0.5"
+
+        def detect_local_ip(self):
+            return "10.0.0.5"
+
+    def test_startup_checks_starts_guard(self, tmp_path, monkeypatch):
+        import config as cfgmod
+        from core import Controller
+
+        c = Controller(cfg=cfgmod.Config(str(tmp_path / "config.json")))
+        called = []
+        monkeypatch.setattr(c, "start_guard", lambda: called.append(1))
+        monkeypatch.setattr(c, "sync_autostart", lambda: None)
+
+        c.startup_checks()
+        assert called, "启动检查没把网络守护拉起来"
+
+    def test_guard_start_is_idempotent(self, tmp_path, monkeypatch):
+        import config as cfgmod
+        import core as coremod
+        from core import Controller
+
+        c = Controller(cfg=cfgmod.Config(str(tmp_path / "config.json")))
+        started = []
+
+        class _FakeGuard:
+            def __init__(self, *a, **k):
+                pass
+
+            def start(self):
+                started.append(1)
+
+        # core 里是 `from netguard import NetGuard`，得换 core 的引用
+        monkeypatch.setattr(coremod, "NetGuard", _FakeGuard)
+        c.start_guard()
+        c.start_guard()
+        assert len(started) == 1, "重复调用会起多个守护线程"
+
+    def test_offline_reported_even_if_never_online(self, monkeypatch):
+        """开机就是断网（从没在线过）时，也必须上报一次离线。"""
+        import netguard
+
+        events = []
+        g = netguard.NetGuard(self._FakeAuth(), on_event=events.append,
+                              logger=lambda *a, **k: None)
+        monkeypatch.setattr(netguard, "probe_online", lambda *a, **k: False)
+
+        g._tick()
+        assert not [e for e in events if e.kind == "offline"], "一次抖动不该报警"
+
+        g._tick()
+        assert [e for e in events if e.kind == "offline"], "开机断网时守护线程不报警"
+
+        g._tick()
+        assert len([e for e in events if e.kind == "offline"]) == 1, "同一段离线重复报警"
+
+
+class TestDelayedLogin:
+    def test_fires_immediately_when_network_ready(self, tmp_path, monkeypatch):
+        """网卡早就好了就别干等 —— 以前固定 sleep 8 秒。"""
+        import config as cfgmod
+        from core import Controller
+
+        c = Controller(cfg=cfgmod.Config(str(tmp_path / "config.json")))
+        monkeypatch.setattr(c.auth, "detect_local_ip", lambda: "10.0.0.5")
+
+        fired = []
+        monkeypatch.setattr(c, "login",
+                            lambda takeover=False: fired.append(time.monotonic()))
+
+        t0 = time.monotonic()
+        c.delayed_login(8)
+        for _ in range(100):
+            if fired:
+                break
+            time.sleep(0.02)
+
+        assert fired, "没有触发认证"
+        waited = fired[0] - t0
+        assert waited < 2.0, f"网络已就绪却等了 {waited:.1f}s"
+
+    def test_waits_when_no_ip_yet(self, tmp_path, monkeypatch):
+        """网卡还没起来时要等，最多等到超时。"""
+        import config as cfgmod
+        from core import Controller
+
+        c = Controller(cfg=cfgmod.Config(str(tmp_path / "config.json")))
+        monkeypatch.setattr(c.auth, "detect_local_ip", lambda: "")
+
+        fired = []
+        monkeypatch.setattr(c, "login", lambda takeover=False: fired.append(1))
+
+        t0 = time.monotonic()
+        c.delayed_login(2)
+        for _ in range(200):
+            if fired:
+                break
+            time.sleep(0.02)
+
+        assert fired
+        assert time.monotonic() - t0 >= 1.5, "没等到超时就认证了"

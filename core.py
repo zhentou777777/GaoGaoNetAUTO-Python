@@ -767,6 +767,14 @@ class Controller:
     # ------------------------------------------------------------ 守护
 
     def start_guard(self):
+        """启动网络守护（幂等）。
+
+        ⚠️ 这个方法**曾经没人调用** —— Web 版重构时把接线弄丢了，
+        和 ``startup_checks`` 是同一批。后果是断网检测、出口 IP 变化检测、
+        断线自动重连全部不生效：程序在托盘里跑着，网络断了却不会自己恢复。
+        """
+        if self.guard is not None:
+            return
         self.guard = NetGuard(self.auth, interval=20, logger=self.log,
                                on_event=self._on_guard_event)
         self.guard.start()
@@ -833,9 +841,24 @@ class Controller:
             self.apply_autostart(True)
 
     def delayed_login(self, seconds: int):
-        """延迟若干秒后自动认证（开机时网络尚未就绪）。"""
+        """等网络就绪后自动认证（开机自启时用）。
+
+        开机时网卡 / DHCP 可能还没就绪，所以不能立刻认证；但也不该死等
+        固定秒数 —— 网卡早就好的话那几秒纯属白等。实测「开机到能上网」
+        那 17 秒里，有 8 秒就是这么耗掉的。
+
+        改成每秒探一次「拿到内网 IP 了吗」：就绪就立刻认证，最多等
+        ``seconds`` 秒（到点还没 IP 也照样交给 login 去报错）。
+        """
         def _worker():
-            time.sleep(seconds)
+            deadline = time.monotonic() + max(0.0, float(seconds))
+            while time.monotonic() < deadline:
+                try:
+                    if self.auth.detect_local_ip():
+                        break
+                except Exception:
+                    pass
+                time.sleep(1)
             self.login(takeover=False)
 
         threading.Thread(target=_worker, daemon=True).start()
@@ -850,6 +873,9 @@ class Controller:
         if problem:
             self.log(f"⚠ {problem}")
             self.log(f"配置文件位置：{self.cfg.path}")
+        # 网络守护要在认证之前起来：万一这次认证失败（开机时网关还没就绪），
+        # 靠它检测「一直离线」并自动重试。以前它根本没被调用过。
+        self.start_guard()
         self.sync_autostart()
         if self.cfg.has_token():
             # 只读体检：走 onestatus，不会改变在线状态、不占名额

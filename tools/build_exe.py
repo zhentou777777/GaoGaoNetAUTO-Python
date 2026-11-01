@@ -176,6 +176,32 @@ def build(onefile: bool = False, clean: bool = True) -> int:
     # 挪到**同一个盘**下的临时目录（跨盘 rename 会失败）。
     # 打包成功后再挪回来：否则紧随其后的 make_release.py 找不到 onedir
     # 产物，portable 包会被静默跳过（CI 就是这么打出「三缺一」的）。
+    # PyInstaller 的 `--clean` 还会清 `build/<NAME>`（里面有 localpycs 等
+    # 上百个文件）。同样会触发批量删除保护：删除失败后 PyInstaller 继续
+    # 往下走，最后只报一句「打包失败」，日志里只剩一行 safe-delete 警告。
+    # build 是纯中间产物，挪走就行，不用挪回来。
+    # 暂存一律放项目根下的 _stash/，**不要**放在 dist 或 build 里：
+    # 产物特征审计会扫整个 dist，旧 onedir 里的 DLL/Tcl 文件会命中
+    # 「注入类 API / 键盘钩子 / UPX」这类特征，把构建判成高危。
+    stash_root = HERE / "_stash"
+    try:
+        stash_root.mkdir(exist_ok=True)
+    except Exception:
+        pass
+
+    build_stale = HERE / "build" / NAME
+    if build_stale.is_dir():
+        bbase = stash_root / f"build_{NAME}"
+        bstash = bbase
+        n = 1
+        while bstash.exists():
+            bstash = bbase.with_name(f"{bbase.name}_{n}")
+            n += 1
+        try:
+            build_stale.rename(bstash)
+        except Exception:
+            pass
+
     stash = None
     if onefile:
         stale = HERE / "dist" / NAME
@@ -186,7 +212,7 @@ def build(onefile: bool = False, clean: bool = True) -> int:
             # 而失败 —— 于是旧目录既没删掉也没挪走，PyInstaller 的
             # `--noconfirm` 自己去删又被拦，整个打包就死在这一步
             # （日志里只有一句「打包失败」，看不出原因）。
-            base = HERE / "dist" / f"_stash_{NAME}"
+            base = stash_root / f"dist_{NAME}"
             stash = base
             n = 1
             while stash.exists():

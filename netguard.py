@@ -106,6 +106,7 @@ class NetGuard:
         self.last_ip = ""
         self.online = False
         self._fail_streak = 0
+        self._offline_reported = False
         self._reconnecting = False
 
     # ------------------------------------------------------------ 生命周期
@@ -178,18 +179,24 @@ class NetGuard:
             was_online = self.online
             self.online = online
 
-        if online and not was_online:
-            self._fail_streak = 0
-            self.log("网络已连通")
-            self.on_event(GuardEvent("online", "网络恢复", ip))
-        elif online:
+        if online:
             # 在线时把失败计数清零，否则「抖动一次 → 恢复 → 再抖动」
             # 会让计数累积，第二次抖动就被当成断网。
             self._fail_streak = 0
+            if not was_online:
+                self._offline_reported = False
+                self.log("网络已连通")
+                self.on_event(GuardEvent("online", "网络恢复", ip))
         else:
             self._fail_streak += 1
-            # 连续 2 次判定为断网才上报，避免瞬时抖动误触发
-            if self._fail_streak >= 2 and was_online:
+            # 连续 2 次判定为断网才上报，避免瞬时抖动误触发。
+            #
+            # ⚠️ 判据里**不能**要求「之前是在线」：开机时本来就从「离线」
+            # 起步，万一开机那次认证失败，``was_online`` 会一直是 False，
+            # 这个事件就永远不触发 —— 守护线程等于白起。
+            # 改用「同一段离线只报一次」，联网后复位。
+            if self._fail_streak >= 2 and not self._offline_reported:
+                self._offline_reported = True
                 self.log("检测到断网，准备重新认证")
                 self.on_event(GuardEvent("offline", "网络中断", ip))
 

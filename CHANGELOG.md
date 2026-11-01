@@ -6,6 +6,31 @@
 
 ---
 
+## [1.0.6] — 2026-11-01
+
+### 修复
+
+- **网络守护线程从来没启动过**（`core.py`）：`Controller.start_guard()` 和
+  `startup_checks()` 是同一批在 Web 版重构时丢掉接线的。后果很实在：
+  断网检测、出口 IP 变化检测、断线自动重连**全部不生效** —— 程序在托盘里
+  跑着，网络断了却不会自己恢复，只能手动点「立即认证」。
+  现在 `startup_checks()` 第一件事就是把它拉起来（幂等，重复调用不会起
+  多个线程）。
+- **开机后一直离线时守护线程不报警**（`netguard.py`）：原来的离线判定要求
+  「之前是在线」（`was_online`），可开机场景本来就从离线起步 —— 一旦开机
+  那次认证失败，这个事件永远不会触发，守护线程等于白起。改成「同一段离线
+  只报一次、联网后复位」。
+- **开机自动认证干等 8 秒**（`core.py`）：`delayed_login(8)` 是死等固定
+  秒数，本意是等网卡 / DHCP 就绪。实测网卡早就好了，那 8 秒纯属白耗
+  （「开机到能上网」的 17 秒里有 8 秒在这）。现在每秒探一次内网 IP，
+  就绪就立刻认证，最多等 8 秒。
+
+### 实测
+
+同一台机器，改前开机到能上网 2 分 40 秒（其中 2 分 23 秒是 Windows 依次
+拉起 14 个启动项，程序无法控制；17 秒是程序自己）。改后程序侧这 17 秒
+缩到个位数，并且掉线后能被守护线程自动救回来。
+
 ## [1.0.5] — 2026-10-31
 
 ### 修复
@@ -299,6 +324,7 @@ pytest 84 → **89 项**（开机自启的兜底写入、过期识别、失败�
 - 校园网网关为明文 HTTP（协议决定，厂商侧支持才能改）
 - 自签名不等于 SmartScreen 放行，根治需采购正规证书
 
+[1.0.6]: https://github.com/zhentou777777/GaoGaoNetAUTO-Python/releases/tag/v1.0.6
 [1.0.5]: https://github.com/zhentou777777/GaoGaoNetAUTO-Python/releases/tag/v1.0.5
 [1.0.4]: https://github.com/zhentou777777/GaoGaoNetAUTO-Python/releases/tag/v1.0.4
 [1.0.3]: https://github.com/zhentou777777/GaoGaoNetAUTO-Python/releases/tag/v1.0.3

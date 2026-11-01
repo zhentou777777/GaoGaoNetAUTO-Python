@@ -41,7 +41,7 @@ except Exception:
 # 脚本在 tools/ 下，项目根要向上一层
 HERE = Path(__file__).resolve().parent.parent
 NAME = "GaoGaoNetAUTO"
-VERSION = "1.0.5"
+VERSION = "1.0.6"
 
 # 源码包要带的文件
 # ⚠️ 交付包一律用**英文文件名**：中文名上传 GitHub Release 会 HTTP 404
@@ -121,7 +121,11 @@ def build_onefile_zip(out_dir: Path) -> Path | None:
 
 
 def build_source_zip(out_dir: Path) -> Path | None:
-    stage = HERE / "dist" / f"{NAME}-源码-v{VERSION}"
+    # 中间目录**不能**建在 dist 里：build_exe 的产物特征审计会扫整个 dist，
+    # 而源码包里带着 `tools/audit_features.py` —— 那文件本身写着
+    # VirtualAllocEx / SetWindowsHookEx / UPX 这些检测关键词，
+    # 于是审计把自己扫成了「4 项高危」，构建直接中止。
+    stage = HERE / "_stage" / f"{NAME}-源码-v{VERSION}"
     if stage.exists():
         shutil.rmtree(stage)
     stage.mkdir(parents=True, exist_ok=True)
