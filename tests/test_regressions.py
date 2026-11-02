@@ -239,9 +239,27 @@ class TestAutostartWrite:
         autostart, target = self._startup(tmp_path, monkeypatch)
         other = tmp_path / "elsewhere.exe"
         other.write_bytes(b"MZ")
-        cmd = '@echo off\r\nstart "" "%s" --silent\r\n' % other
+        cmd = ('@echo off\r\nrem %s\r\nstart "" "%s" --silent\r\n'
+               % (autostart._ENTRY_MARK, other))
         target.write_bytes(cmd.encode("gbk"))
         assert autostart.autostart_stale() is False
+
+    def test_old_format_is_upgraded_once(self, tmp_path, monkeypatch):
+        """旧格式（没有执行痕迹）要重写一次，之后就稳定下来。
+
+        没有痕迹就没法区分「启动项没被执行」和「启动了但程序没起来」，
+        这是排查「开机没网」时唯一的硬证据。
+        """
+        autostart, target = self._startup(tmp_path, monkeypatch)
+        autostart.apply_autostart(True)
+        # 已经指向本程序，但退化成旧格式
+        old = '@echo off\r\nstart "" %s\r\n' % autostart._entry_command()
+        target.write_bytes(old.encode("gbk"))
+        assert autostart.autostart_stale() is True
+
+        autostart.apply_autostart(True)
+        assert autostart.autostart_stale() is False
+        assert b"launcher fired" in target.read_bytes()
 
     def test_same_content_is_not_rewritten(self, tmp_path, monkeypatch):
         """内容已经一样就别再写一遍。

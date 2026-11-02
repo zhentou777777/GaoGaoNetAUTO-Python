@@ -6,6 +6,43 @@
 
 ---
 
+## [1.0.7] — 2026-11-02
+
+### 修复
+
+- **单实例锁的 last-error 未清零**（`taskbar.py`）
+  `CreateMutexW` **成功新建** mutex 时按文档不会设置 last error，
+  于是紧接着的 `get_last_error()` 读到的是**上一个 API 残留的值**。
+  一旦那个值恰好是 `183`（`ERROR_ALREADY_EXISTS`），程序就会误判
+  「已有实例在跑」，`--silent` 模式下**静默 `return 0`** —— 没有窗口、
+  没有日志、没有网络。
+  现在调用前显式 `set_last_error(0)`，只在真正重复时才算重复。
+  （这一条是**潜在缺陷的加固**：本次「开机没网」尚未能确证是它导致的，
+  但这类失败完全随机，且正好对得上「有的开机有网、有的没有」。）
+
+- **被单实例锁挡下时不留任何痕迹**（`main.py`）
+  上面那条之所以难查，是因为走这条路时进程秒退且不写日志。
+  现在无论什么原因退出，都会落一行
+  `已有实例在运行，本次启动退出（silent=...）`。
+
+### 新增
+
+- **开机自启的执行痕迹**（`autostart.py`）
+  自启脚本 `.cmd` 现在会往 `autostart.log` 写两行时间戳
+  （`launcher fired` / `launcher done`），程序起来后再把最近一条读进
+  `app.log`。这样「开机没网」就能一眼分清是**启动项压根没被执行**
+  还是**执行了但排在别的自启程序后面**——这两种的修法完全不同。
+  旧格式的 `.cmd` 会在下次启动时自动升级一次。
+
+### 变更
+
+- **自启脚本不再设为隐藏文件**（`autostart.py`）
+  隐藏的启动项在任务管理器的「启动」选项卡里**根本不显示**，
+  用户既没法确认自启有没有生效，也没法在系统层面启用或禁用它。
+  隐藏属性对「黑框闪烁」也没有任何作用——那是 cmd.exe 自己的窗口。
+
+---
+
 ## [1.0.6] — 2026-11-01
 
 ### 修复
@@ -324,6 +361,7 @@ pytest 84 → **89 项**（开机自启的兜底写入、过期识别、失败�
 - 校园网网关为明文 HTTP（协议决定，厂商侧支持才能改）
 - 自签名不等于 SmartScreen 放行，根治需采购正规证书
 
+[1.0.7]: https://github.com/zhentou777777/GaoGaoNetAUTO-Python/releases/tag/v1.0.7
 [1.0.6]: https://github.com/zhentou777777/GaoGaoNetAUTO-Python/releases/tag/v1.0.6
 [1.0.5]: https://github.com/zhentou777777/GaoGaoNetAUTO-Python/releases/tag/v1.0.5
 [1.0.4]: https://github.com/zhentou777777/GaoGaoNetAUTO-Python/releases/tag/v1.0.4

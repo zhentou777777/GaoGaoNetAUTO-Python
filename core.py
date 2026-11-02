@@ -865,6 +865,28 @@ class Controller:
 
     # ------------------------------------------------------------ 启动检查
 
+    def log_autostart_trace(self):
+        """把开机自启脚本留下的执行痕迹写进日志。
+
+        「开机没网」有两种完全不同的断点，日志必须能区分开：
+
+        * 痕迹里没有本次开机的记录 → 启动项压根没被执行（Windows 的启动
+          队列跳过了它），怎么改程序都没用，得从启动项本身下手；
+        * 痕迹有记录，但比本次进程启动早很久 → 启动项执行了，只是排在别的
+          自启程序后面，属于「慢」不是「没跑」。
+
+        没有这条信息，只能靠猜。
+        """
+        if not self.cfg.get("autostart"):
+            return
+        from autostart import trace_tail
+
+        tail = trace_tail(2)
+        if not tail:
+            self.log("开机自启痕迹：暂无（启动项还没被执行过，或脚本是旧格式）")
+            return
+        self.log("开机自启痕迹：" + " | ".join(tail))
+
     def startup_checks(self):
         self.emit("info")
         # 配置读/写不了要说出来。否则表现为「设置改了但重启就没了」
@@ -877,6 +899,7 @@ class Controller:
         # 靠它检测「一直离线」并自动重试。以前它根本没被调用过。
         self.start_guard()
         self.sync_autostart()
+        self.log_autostart_trace()
         if self.cfg.has_token():
             # 只读体检：走 onestatus，不会改变在线状态、不占名额
             self.check_token()

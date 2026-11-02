@@ -18,6 +18,10 @@ from typing import Optional
 
 CMD_NAME = "GaoGaoNetAUTO.cmd"
 
+# 脚本里的格式标记。看到它说明这份 .cmd 是「带执行痕迹」的新版本；
+# 没有就是旧版本，需要重写一次才能诊断开机自启到底跑到哪一步。
+_ENTRY_MARK = "GaoGaoNetAUTO startup launcher"
+
 # 写入失败的重试次数与间隔。
 #
 # 启动文件夹是杀软重点盯防的位置，「往这里写 .cmd」很容易被实时防护、
@@ -77,7 +81,7 @@ def _entry_command() -> str:
 
 
 def hide_file(path: Path):
-    """给文件加「隐藏」属性（避免启动时闪一个黑框）。"""
+    """给文件加「隐藏」属性。**已不再使用**，保留是为了兼容旧调用点。"""
     try:
         import ctypes
 
@@ -110,11 +114,62 @@ def _clear_attributes(path: Path) -> None:
         pass
 
 
+def trace_path() -> Optional[Path]:
+    """自启脚本的执行痕迹文件。
+
+    「开机没网」最难查的地方是**分不清两种完全不同的失败**：
+
+    * 启动项根本没被执行（Windows 的启动队列跳过了它）；
+    * 启动项执行了，但程序没能跑起来（路径没了、被拦了、秒退）。
+
+    这两种的修法完全不同。所以在 .cmd 里留一行时间戳，程序起来后读它，
+    一比对就知道中间差了多少、卡在哪一环。
+    """
+    try:
+        from config import data_dir
+
+        return Path(data_dir()) / "autostart.log"
+    except Exception:
+        return None
+
+
+def trace_tail(limit: int = 3) -> list:
+    """读自启痕迹的最后几行（没有就返回空列表）。"""
+    p = trace_path()
+    try:
+        if not (p and p.is_file()):
+            return []
+        text = p.read_text(encoding="gbk", errors="replace")
+    except OSError:
+        return []
+    lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
+    return lines[-limit:] if lines else []
+
+
 def _cmd_bytes() -> bytes:
-    """自启脚本内容。.cmd 由 cmd.exe 读取，中文必须用 GBK（系统 ANSI 代码页）。"""
-    return ("@echo off\r\n"
-            "rem 糕糕校园网自动认证 —— 开机自启\r\n"
-            f"start \"\" {_entry_command()}\r\n").encode("gbk", errors="replace")
+    """自启脚本内容。
+
+    ``.cmd`` 由 cmd.exe 读取，中文必须用 GBK（系统 ANSI 代码页）——
+    但这里干脆全用 ASCII：脚本一旦编码错乱就是「静默不执行」，
+    而开机自启恰恰是最没人在旁边看着的场景。
+
+    ``start "" "<exe>"`` 的写法不能改：``autostart_stale()`` 用正则从
+    内容里抠出被启动的路径，格式变了就解析不出来。
+    """
+    trace = trace_path()
+    lines = [
+        "@echo off",
+        "rem GaoGaoNetAUTO startup launcher",
+        "setlocal",
+    ]
+    if trace is not None:
+        lines.append(f'set "TRACE={trace}"')
+        lines.append('>>"%TRACE%" 2>nul echo [%date% %time%] launcher fired')
+    lines.append(f'start "" {_entry_command()}')
+    if trace is not None:
+        lines.append('>>"%TRACE%" 2>nul echo [%date% %time%] launcher done')
+    lines.append("endlocal")
+    return ("\r\n".join(lines) + "\r\n").encode("gbk", errors="replace")
 
 
 def _exists(target: Optional[Path]) -> bool:
@@ -232,7 +287,7 @@ def _entry_target(text: str) -> str:
 
 
 def autostart_stale() -> bool:
-    """自启文件在，但已经没用了（程序被移走 / 删掉）。
+    """自启文件在，但已经没用了（程序被移走 / 删掉 / 还是旧格式）。
 
     只看「文件存在」会把坏条目当成正常 —— 开机静默启动一个不存在的路径，
     用户完全看不出问题。
@@ -248,7 +303,9 @@ def autostart_stale() -> bool:
     except Exception:
         return True
     if _entry_command() in text:
-        return False
+        # 路径对，但可能还是**旧格式**（没有执行痕迹那一版）。
+        # 旧格式没法回答「启动项到底有没有被执行」，顺手升级掉。
+        return _ENTRY_MARK not in text
     target = _entry_target(text)
     if not target:
         return True          # 解析不出启动项，宁可重写
@@ -274,7 +331,13 @@ def apply_autostart(enable: bool) -> tuple:
                 # 用户以为自启没开，下次启动又白忙一遍。
                 if not _same_bytes(target, data):
                     raise
-            hide_file(target)
+            # 不设「隐藏」属性。
+            #
+            # 以前为了让启动文件夹看起来干净，把这个 .cmd 设成隐藏。代价是
+            # **任务管理器的「启动」选项卡里根本看不到它** —— 用户既没法确认
+            # 自启到底有没有生效，也没法在系统层面启用/禁用它。
+            # 隐藏属性对「黑框闪烁」也没有任何作用（那是 cmd.exe 自己的窗口）。
+            _clear_attributes(target)
             return True, "已开启开机自启（启动文件夹）"
         if target.exists():
             _clear_attributes(target)

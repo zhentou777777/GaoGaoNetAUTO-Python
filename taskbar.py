@@ -66,6 +66,14 @@ def acquire_single_instance() -> bool:
     _kernel32.CreateMutexW.argtypes = [
         ctypes.c_void_p, wintypes.BOOL, wintypes.LPCWSTR,
     ]
+    # 调用前必须把 last-error 清零。
+    #
+    # CreateMutexW **成功新建** 时按文档不会设置 last error，于是
+    # get_last_error() 读到的就是**上一个 API 残留的值**。如果那个值恰好
+    # 是 183(ERROR_ALREADY_EXISTS)，程序就会认定「已有实例在跑」，
+    # --silent 模式下静默 return 0 —— 没窗口、没日志、没网。
+    # 这种偶发失败极难复现，却正好能解释「开机自启时好时坏」。
+    ctypes.set_last_error(0)
     handle = _kernel32.CreateMutexW(None, True, _MUTEX_NAME)
     err = ctypes.get_last_error()
     if not handle:
