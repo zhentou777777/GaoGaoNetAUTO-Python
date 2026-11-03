@@ -806,13 +806,11 @@ class Controller:
         return autostart_enabled()
 
     def apply_autostart(self, enable: bool) -> tuple:
-        from autostart import apply_autostart, migrate_autostart_legacy
+        from autostart import apply_autostart
 
         ok, msg = apply_autostart(enable)
         if ok:
             self.log(msg)
-            if enable:
-                migrate_autostart_legacy()
         else:
             self.log(msg)
             # 没写成就不把开关留在「开」的状态 —— 否则每次启动都要再失败一次，

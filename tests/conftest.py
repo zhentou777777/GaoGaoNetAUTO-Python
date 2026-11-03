@@ -26,3 +26,23 @@ def _isolated_data_dir(tmp_path_factory):
     os.environ["GAOGAO_DATA_DIR"] = str(d)
     yield d
     os.environ.pop("GAOGAO_DATA_DIR", None)
+
+
+@pytest.fixture(autouse=True)
+def _no_real_registry(monkeypatch):
+    """开机自启的注册表 Run 项一律打桩，**绝不碰真实注册表**。
+
+    数据目录可以用 ``GAOGAO_DATA_DIR`` 改道，注册表没有这种开关。
+    漏打桩的后果很直接：任何一次 ``apply_autostart(True)`` 都会把用户真实的
+    开机自启从 exe 改写成 ``pythonw.exe main.py``（源码模式的入口），
+    下次开机自启直接失效 —— 而这恰恰是用户正在报障的功能。
+    """
+    import autostart
+
+    store = {}
+    monkeypatch.setattr(autostart, "_run_get", lambda: store.get("value"))
+    monkeypatch.setattr(autostart, "_run_set",
+                        lambda v: store.__setitem__("value", v))
+    monkeypatch.setattr(autostart, "_run_delete",
+                        lambda: store.pop("value", None))
+    yield store

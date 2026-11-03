@@ -303,7 +303,6 @@ class App:
         self._acct_fail_until = 0.0
 
         self._build()
-        self._migrate_autostart_legacy()
         self._load_settings()
         self._setup_tray()
         self._start_guard()
@@ -1736,38 +1735,6 @@ class App:
             return bool(p and p.exists())
         except Exception:
             return False
-
-    def _migrate_autostart_legacy(self):
-        """把旧版写在注册表 Run 里的自启项迁到启动文件夹。
-
-        旧版用的是 ``HKCU\\...\\CurrentVersion\\Run``（Defender T1547.001
-        高危特征）。升级后自动清掉注册表项并在启动文件夹落一个 ``.cmd``，
-        行为不变但不再触发杀软对「注册表自启动」的规则。
-        """
-        if sys.platform != "win32":
-            return
-        try:
-            import winreg
-
-            key_path = r"Software\Microsoft\Windows\CurrentVersion\Run"
-            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, key_path, 0,
-                                winreg.KEY_READ | winreg.KEY_SET_VALUE) as key:
-                try:
-                    val, _ = winreg.QueryValueEx(key, "GaoGaoNetAUTO")
-                except FileNotFoundError:
-                    return
-                if not val:
-                    return
-                winreg.DeleteValue(key, "GaoGaoNetAUTO")
-            if not self._autostart_enabled():
-                self._apply_autostart(True)
-                try:
-                    self.cfg.set("autostart", True)
-                except Exception:
-                    pass
-                self.log("已把开机自启从注册表迁移到启动文件夹")
-        except Exception:
-            pass
 
     def _apply_autostart(self, enable: bool):
         """开机自启。

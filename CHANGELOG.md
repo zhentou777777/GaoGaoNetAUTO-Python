@@ -6,6 +6,47 @@
 
 ---
 
+## [1.0.8] — 2026-11-03
+
+### 修复
+
+- **开机自启其实是「解锁自启」：主入口改回注册表 Run 项**（`autostart.py`）
+
+  v1.0.7 加的执行痕迹这次直接给出了答案。实测同一天开机：
+
+  | 时刻 | 事件 |
+  |---|---|
+  | 09:11:09 | 系统启动 |
+  | 09:11:22 | 桌面就绪（explorer 起来） |
+  | 09:11:35–09:11:50 | OneDrive / IDMan / Steam / WorkBuddy 陆续启动 |
+  | 09:30:50 | 用户解锁屏幕 |
+  | **09:31:18** | **我们的启动脚本才被执行**，程序随即启动、09:31:31 认证成功 |
+
+  其他自启程序走**注册表 Run 项**，登录后十几秒就起来了；只有走
+  **启动文件夹**的我们被推迟到了**解锁之后**，整整晚了 20 分钟。
+  也就是说，早期为了规避 Defender T1547.001 特征而只用启动文件夹，
+  换来的代价是「开机自启」在这台机器上实际是「解锁自启」——
+  对校园网认证这种「开机就该有网」的场景，这个差别是致命的。
+
+  现在改成 **Run 项为主（登录即启动）+ 启动文件夹 .cmd 兜底**：
+  万一 Run 项被安全软件清掉，至少还有一条路能起来，单实例锁保证不会双开。
+  Run 项写入被拦时会**优雅降级**为只用启动文件夹，并明确提示会慢一些。
+
+- **删掉方向反了的旧迁移**（`core.py` / `legacy/tkui.py`）
+  旧的 `migrate_autostart_legacy()` 会**主动删除注册表 Run 项**并改写启动
+  文件夹——那是「Run → 启动文件夹」时代的逻辑。主入口换回 Run 项之后，
+  它每次启动都会把主入口删掉，必须移除。
+
+### 测试
+
+- **注册表操作全面打桩**（`tests/conftest.py`）
+  数据目录可以用 `GAOGAO_DATA_DIR` 改道，注册表没有这种开关。
+  漏打桩时跑一遍测试，就把开发机真实的开机自启从 exe 改写成了
+  `pythonw.exe main.py`（源码模式入口），下次开机直接失效。
+  现在 session/function 两级 fixture 都把 Run 项读写指向内存字典。
+
+---
+
 ## [1.0.7] — 2026-11-02
 
 ### 修复
@@ -361,6 +402,7 @@ pytest 84 → **89 项**（开机自启的兜底写入、过期识别、失败�
 - 校园网网关为明文 HTTP（协议决定，厂商侧支持才能改）
 - 自签名不等于 SmartScreen 放行，根治需采购正规证书
 
+[1.0.8]: https://github.com/zhentou777777/GaoGaoNetAUTO-Python/releases/tag/v1.0.8
 [1.0.7]: https://github.com/zhentou777777/GaoGaoNetAUTO-Python/releases/tag/v1.0.7
 [1.0.6]: https://github.com/zhentou777777/GaoGaoNetAUTO-Python/releases/tag/v1.0.6
 [1.0.5]: https://github.com/zhentou777777/GaoGaoNetAUTO-Python/releases/tag/v1.0.5

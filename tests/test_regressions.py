@@ -202,6 +202,15 @@ class TestAutostartWrite:
         d = tmp_path / "Startup"
         d.mkdir()
         monkeypatch.setattr(autostart, "startup_dir", lambda: d)
+        # 注册表 Run 项**必须**打桩：有一次没打桩，跑一遍测试就把用户真实的
+        # 开机自启从 exe 改成了 `pythonw.exe main.py`，开机直接失效。
+        store = {}
+        monkeypatch.setattr(autostart, "_run_get", lambda: store.get("value"))
+        monkeypatch.setattr(autostart, "_run_set",
+                            lambda v: store.__setitem__("value", v))
+        monkeypatch.setattr(autostart, "_run_delete",
+                            lambda: store.pop("value", None))
+        self._run_store = store
         return autostart, d / autostart.CMD_NAME
 
     def test_write_falls_back_to_temp_replace(self, tmp_path, monkeypatch):
@@ -321,10 +330,40 @@ class TestAutostartWrite:
         monkeypatch.setattr(
             autostart.os, "replace",
             lambda *a: (_ for _ in ()).throw(PermissionError(13, "denied")))
+        # 两条路都被拦，才算真的失败
+        monkeypatch.setattr(
+            autostart, "_run_set",
+            lambda v: (_ for _ in ()).throw(PermissionError(13, "denied")))
         ok, msg = autostart.apply_autostart(True)
         assert ok is False
         assert "shell:startup" in msg
         assert "安全软件" in msg
+
+    def test_run_key_is_primary_entry(self, tmp_path, monkeypatch):
+        """Run 项是主入口：登录即执行，不用等解锁。"""
+        autostart, target = self._startup(tmp_path, monkeypatch)
+        ok, msg = autostart.apply_autostart(True)
+        assert ok
+        assert self._run_store["value"] == autostart._entry_command()
+        assert autostart.autostart_enabled() is True
+
+        # 关掉时两条路都要清干净
+        ok, _ = autostart.apply_autostart(False)
+        assert ok
+        assert self._run_store.get("value") is None
+        assert not target.exists()
+
+    def test_run_key_blocked_falls_back_to_startup_folder(self, tmp_path, monkeypatch):
+        """Run 项被安全软件拦下时降级到启动文件夹，并如实告诉用户会慢。"""
+        autostart, target = self._startup(tmp_path, monkeypatch)
+        monkeypatch.setattr(
+            autostart, "_run_set",
+            lambda v: (_ for _ in ()).throw(PermissionError(5, "denied")))
+        ok, msg = autostart.apply_autostart(True)
+        assert ok, "主入口被拦不该让整个自启失败"
+        assert target.exists(), "兜底的启动脚本没写"
+        assert "解锁" in msg, "没有告知用户启动会推迟"
+        assert autostart.autostart_enabled() is True
 
     def test_failed_enable_reverts_config_flag(self, tmp_path, monkeypatch):
         """开不了自启时要把配置里的开关拨回去，否则每次启动都再失败一次。"""

@@ -1,9 +1,26 @@
 # -*- coding: utf-8 -*-
 """开机自启。
 
-**不用注册表 Run 项**（``HKCU\\...\\CurrentVersion\\Run`` 属于 Defender
-T1547.001「注册表自启动/持久化」的高危特征，容易被杀软直接拦下）。
-改为在「启动」文件夹放一个 ``.cmd`` 快捷脚本，行为等价但特征风险低得多。
+**主入口：注册表 Run 项**；**兜底：「启动」文件夹里的 .cmd**。
+
+为什么改回 Run 项
+-----------------
+早期刻意只用「启动」文件夹，是因为 ``HKCU\\...\\CurrentVersion\\Run`` 属于
+Defender T1547.001「注册表自启动/持久化」的特征。但实测下来，这两种方式
+在 Windows 上的**执行时机完全不同**：
+
+* **Run 项**：用户登录时由 Explorer 立即执行。实测同一台机器上 OneDrive、
+  Steam、IDMan 全在登录后 10–30 秒内就起来了。
+* **启动文件夹**：在这台机器上被推迟到了**用户解锁屏幕之后**。
+  开机 09:11:09 → 桌面 09:11:22 → 其他自启程序 09:11:35 起 →
+  我们的 .cmd **09:31:18**（解锁后 28 秒）才被执行，程序晚了整整 20 分钟。
+
+也就是说，「开机自启」在启动文件夹这条路上实际是「**解锁自启**」。
+对校园网认证这种「开机就该有网」的场景，这个差别是致命的。
+
+因此改成 Run 项为主（登录即启动），启动文件夹的 .cmd 保留为**兜底**：
+万一 Run 项被安全软件清掉，至少还有一条路能起来。单实例锁保证不会双开。
+写入 Run 项失败时会**优雅降级**为只用启动文件夹，并如实告知用户会慢一些。
 
 抽成独立模块，让 Web 版和旧版 Tk 界面共用同一份逻辑。
 """
@@ -17,6 +34,10 @@ from pathlib import Path
 from typing import Optional
 
 CMD_NAME = "GaoGaoNetAUTO.cmd"
+
+# 注册表 Run 项（主入口）。HKCU 下不需要管理员权限。
+RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
+RUN_VALUE = "GaoGaoNetAUTO"
 
 # 脚本里的格式标记。看到它说明这份 .cmd 是「带执行痕迹」的新版本；
 # 没有就是旧版本，需要重写一次才能诊断开机自启到底跑到哪一步。
@@ -62,8 +83,50 @@ def startup_cmd_path() -> Optional[Path]:
     return (d / CMD_NAME) if d else None
 
 
+def _run_get() -> Optional[str]:
+    """读注册表 Run 项的当前值（没有返回 None）。"""
+    if sys.platform != "win32":
+        return None
+    try:
+        import winreg
+
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, RUN_KEY) as key:
+            value, _ = winreg.QueryValueEx(key, RUN_VALUE)
+        return str(value) if value else None
+    except OSError:
+        return None
+
+
+def _run_set(value: str) -> None:
+    """写注册表 Run 项。被安全软件拦时抛 OSError，由调用方降级。"""
+    import winreg
+
+    with winreg.OpenKey(winreg.HKEY_CURRENT_USER, RUN_KEY, 0,
+                        winreg.KEY_SET_VALUE) as key:
+        winreg.SetValueEx(key, RUN_VALUE, 0, winreg.REG_SZ, value)
+
+
+def _run_delete() -> None:
+    import winreg
+
+    try:
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, RUN_KEY, 0,
+                            winreg.KEY_SET_VALUE) as key:
+            winreg.DeleteValue(key, RUN_VALUE)
+    except FileNotFoundError:
+        pass
+
+
+def _first_quoted(text: str) -> str:
+    """取出命令行里第一个被引号包住的路径。"""
+    m = re.search(r'"([^"]+)"', text or "")
+    return m.group(1) if m else ""
+
+
 def autostart_enabled() -> bool:
-    """开机自启是否已开启（以启动文件夹里的实际文件为准）。"""
+    """开机自启是否已开启（Run 项或启动文件夹任一存在即算）。"""
+    if _run_get():
+        return True
     p = startup_cmd_path()
     try:
         return bool(p and p.exists())
@@ -78,20 +141,6 @@ def _entry_command() -> str:
     pythonw = Path(sys.executable).with_name("pythonw.exe")
     exe = pythonw if pythonw.exists() else Path(sys.executable)
     return f'"{exe}" "{Path(__file__).resolve().parent / "main.py"}" --silent'
-
-
-def hide_file(path: Path):
-    """给文件加「隐藏」属性。**已不再使用**，保留是为了兼容旧调用点。"""
-    try:
-        import ctypes
-
-        FILE_ATTRIBUTE_HIDDEN = 0x02
-        SetFileAttributesW = ctypes.windll.kernel32.SetFileAttributesW
-        SetFileAttributesW.argtypes = [ctypes.c_wchar_p, ctypes.c_uint32]
-        SetFileAttributesW.restype = ctypes.c_uint32
-        SetFileAttributesW(str(path), FILE_ATTRIBUTE_HIDDEN)
-    except Exception:
-        pass
 
 
 def _clear_attributes(path: Path) -> None:
@@ -287,7 +336,7 @@ def _entry_target(text: str) -> str:
 
 
 def autostart_stale() -> bool:
-    """自启文件在，但已经没用了（程序被移走 / 删掉 / 还是旧格式）。
+    """自启项在，但已经没用了（程序被移走 / 删掉 / 还是旧格式）。
 
     只看「文件存在」会把坏条目当成正常 —— 开机静默启动一个不存在的路径，
     用户完全看不出问题。
@@ -295,6 +344,13 @@ def autostart_stale() -> bool:
     ⚠️ 只把「指向的程序不在了」判为过期。仅仅是路径不同（源码运行 vs
     打包版）不算 —— 否则每换一种运行方式就重写一次，启动项会来回翻烧饼。
     """
+    run_value = _run_get()
+    if run_value:
+        # Run 项是主入口，指向的程序没了就必须重写。
+        target = _first_quoted(run_value)
+        if target and not Path(target).exists():
+            return True
+
     p = startup_cmd_path()
     if not (p and p.exists()):
         return False
@@ -313,80 +369,67 @@ def autostart_stale() -> bool:
 
 
 def apply_autostart(enable: bool) -> tuple:
-    """开关开机自启。返回 ``(ok, message)``。"""
+    """开关开机自启。返回 ``(ok, message)``。
+
+    开启时**两条路都写**：Run 项是主入口（登录即启动），启动文件夹的
+    .cmd 是兜底（万一 Run 项被安全软件清掉，至少还能起来）。
+    单实例锁保证不会双开，晚到的那一路会安静退出。
+    """
     if sys.platform != "win32":
         return False, "开机自启仅支持 Windows"
     target = startup_cmd_path()
-    if target is None:
-        return False, "找不到「启动」文件夹，开机自启不可用"
+    if not enable:
+        try:
+            _run_delete()
+            if target is not None and target.exists():
+                _clear_attributes(target)
+                target.unlink()
+            return True, "已关闭开机自启"
+        except OSError as exc:
+            return False, f"关闭开机自启失败: {exc}"
+
+    # ---- 主入口：注册表 Run 项
+    run_error: Optional[BaseException] = None
     try:
-        if enable:
-            data = _cmd_bytes()
-            try:
-                _write_cmd(target, data)
-            except OSError:
-                # 写失败但文件其实已经是想要的样子（比如刚被另一个实例写好，
-                # 或者写的瞬间被拦了一下）—— 这就是成功，别报假失败。
-                # 假失败的代价很实在：core 会把配置里的开关拨回「关」，
-                # 用户以为自启没开，下次启动又白忙一遍。
-                if not _same_bytes(target, data):
-                    raise
-            # 不设「隐藏」属性。
-            #
-            # 以前为了让启动文件夹看起来干净，把这个 .cmd 设成隐藏。代价是
-            # **任务管理器的「启动」选项卡里根本看不到它** —— 用户既没法确认
-            # 自启到底有没有生效，也没法在系统层面启用/禁用它。
-            # 隐藏属性对「黑框闪烁」也没有任何作用（那是 cmd.exe 自己的窗口）。
-            _clear_attributes(target)
-            return True, "已开启开机自启（启动文件夹）"
-        if target.exists():
-            _clear_attributes(target)
-            target.unlink()
-        return True, "已关闭开机自启"
-    except PermissionError as exc:
-        # PermissionError 在「启动」文件夹上最常见的原因不是 Windows 权限，
-        # 而是安全软件的「启动项保护」或文件正被占用。给出可操作的建议，
-        # 别让用户对着一句 Errno 13 发呆。
-        state = "已存在" if _exists(target) else "不存在"
-        return False, (
-            f"设置开机自启失败：没有权限写入「启动」文件夹（{exc}）\n"
-            f"启动项文件路径：{target}（{state}）\n"
-            "常见原因：360 / 火绒等安全软件的「启动项保护」拦下了写入，"
-            "或该文件正被其他程序占用。\n"
-            "手动做法 1：按 Win+R 输入 shell:startup 打开启动文件夹，"
-            "把程序 exe 的快捷方式放进去即可。\n"
-            "手动做法 2：如果那里已经有一个 GaoGaoNetAUTO.cmd 但删不掉，"
-            "它的文件权限可能坏了（属性→安全 里一片空白），"
-            "用管理员身份执行 icacls \"<上面那个路径>\" /reset 即可修回来。"
-        )
+        _run_set(_entry_command())
     except OSError as exc:
-        return False, f"设置开机自启失败: {exc}"
+        run_error = exc
 
+    # ---- 兜底：启动文件夹 .cmd
+    cmd_error: Optional[BaseException] = None
+    if target is None:
+        cmd_error = OSError("找不到「启动」文件夹")
+    else:
+        data = _cmd_bytes()
+        try:
+            _write_cmd(target, data)
+        except OSError as exc:
+            # 写失败但文件其实已经是想要的样子（比如刚被另一个实例写好，
+            # 或者写的瞬间被拦了一下）—— 这就是成功，别报假失败。
+            # 假失败的代价很实在：core 会把配置里的开关拨回「关」，
+            # 用户以为自启没开，下次启动又白忙一遍。
+            if not _same_bytes(target, data):
+                cmd_error = exc
+        if cmd_error is None:
+            # 不设「隐藏」属性：隐藏的启动项在任务管理器「启动」选项卡里
+            # 根本不显示，用户既没法确认也没法禁用它。
+            _clear_attributes(target)
 
-def migrate_autostart_legacy() -> bool:
-    """把旧版写在注册表 Run 里的自启项迁到启动文件夹。
-
-    旧版用的是 ``HKCU\\...\\CurrentVersion\\Run``。升级后自动清掉注册表项
-    并在启动文件夹落一个 ``.cmd``，行为不变但不再触发杀软对
-    「注册表自启动」的规则。
-    """
-    if sys.platform != "win32":
-        return False
-    try:
-        import winreg
-
-        key_path = r"Software\Microsoft\Windows\CurrentVersion\Run"
-        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, key_path, 0,
-                            winreg.KEY_READ | winreg.KEY_SET_VALUE) as key:
-            try:
-                val, _ = winreg.QueryValueEx(key, "GaoGaoNetAUTO")
-            except FileNotFoundError:
-                return False
-            if not val:
-                return False
-            winreg.DeleteValue(key, "GaoGaoNetAUTO")
-        if not autostart_enabled():
-            apply_autostart(True)
-        return True
-    except Exception:
-        return False
+    if run_error is None:
+        return True, "已开启开机自启（登录即启动）"
+    if cmd_error is None:
+        return True, (
+            "已开启开机自启（启动文件夹）。\n"
+            f"注册表 Run 项写入被拦（{run_error}），本次只能用启动文件夹兜底。\n"
+            "注意：启动文件夹在这台机器上可能要到**解锁屏幕之后**才会执行，"
+            "开机自启会慢一些。"
+        )
+    return False, (
+        f"设置开机自启失败：\n"
+        f"· 注册表 Run 项：{run_error}\n"
+        f"· 启动文件夹：{cmd_error}\n"
+        "常见原因是安全软件的「启动项保护」拦下了写入，可在安全软件里把本程序\n"
+        "加入信任后重试。\n"
+        "手动做法：按 Win+R 输入 shell:startup 打开启动文件夹，"
+        "把程序 exe 的快捷方式放进去即可。"
+    )
